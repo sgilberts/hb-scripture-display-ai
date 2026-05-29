@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "rootDir": ".",
+    "types": ["vite/client"]
+  },
+  "include": [
+    "./index.tsx",
+    "./src/**/*",
+    "./components/**/*",
+    "./context/**/*"
+  ]
+}

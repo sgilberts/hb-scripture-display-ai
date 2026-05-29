@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap");
+
+:root {
+  color-scheme: dark;
+  font-family: "Inter", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background: #0e0e11;
+  color: #e4e1e6;
+}
+
+body {
+  margin: 0;
+  background: #0e0e11;
+  color: #e4e1e6;
+  font-family: "Inter", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+  display: inline-block;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  word-wrap: normal;
+  white-space: nowrap;
+  direction: ltr;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0e0e11;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3c4a42;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #86948a;
+}

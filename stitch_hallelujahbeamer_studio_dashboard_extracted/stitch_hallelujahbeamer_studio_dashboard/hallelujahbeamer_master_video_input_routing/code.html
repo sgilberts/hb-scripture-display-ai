@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Master Video Input Routing - HallelujahBeamer</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-container-lowest": "#0e0e11",
+                      "secondary": "#ffb95f",
+                      "on-tertiary-fixed": "#0d1c2f",
+                      "surface-container-highest": "#353438",
+                      "primary": "#4edea3",
+                      "on-primary-fixed": "#002113",
+                      "surface-container-low": "#1b1b1e",
+                      "error": "#ffb4ab",
+                      "on-secondary-fixed-variant": "#653e00",
+                      "tertiary-fixed-dim": "#b9c7e0",
+                      "secondary-container": "#ee9800",
+                      "on-tertiary": "#233144",
+                      "surface-variant": "#353438",
+                      "tertiary-container": "#95a4bb",
+                      "on-background": "#e4e1e6",
+                      "on-tertiary-fixed-variant": "#3a485c",
+                      "on-surface": "#e4e1e6",
+                      "on-primary-fixed-variant": "#005236",
+                      "on-surface-variant": "#bbcabf",
+                      "inverse-primary": "#006c49",
+                      "inverse-on-surface": "#303033",
+                      "live-preview-bg": "#000000",
+                      "surface-container": "#1f1f22",
+                      "secondary-fixed-dim": "#ffb95f",
+                      "inverse-surface": "#e4e1e6",
+                      "on-secondary-container": "#5b3800",
+                      "surface-dim": "#131316",
+                      "secondary-fixed": "#ffddb8",
+                      "surface-container-high": "#2a2a2d",
+                      "on-error-container": "#ffdad6",
+                      "primary-container": "#10b981",
+                      "on-primary-container": "#00422b",
+                      "tertiary": "#b9c7e0",
+                      "outline-variant": "#3c4a42",
+                      "status-emergency": "#93000a",
+                      "on-primary": "#003824",
+                      "tertiary-fixed": "#d5e3fd",
+                      "on-secondary-fixed": "#2a1700",
+                      "outline": "#86948a",
+                      "on-secondary": "#472a00",
+                      "background": "#131316",
+                      "surface-bright": "#39393c",
+                      "primary-fixed": "#6ffbbe",
+                      "primary-fixed-dim": "#4edea3",
+                      "surface": "#131316",
+                      "error-container": "#93000a",
+                      "status-online": "#4edea3",
+                      "on-tertiary-container": "#2c3a4e",
+                      "on-error": "#690005",
+                      "surface-tint": "#4edea3"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "component-gap": "4px",
+                      "container-padding": "12px",
+                      "unit": "4px",
+                      "gutter": "8px",
+                      "panel-margin": "1px"
+              },
+              "fontFamily": {
+                      "headline-md": ["Inter"],
+                      "label-caps": ["JetBrains Mono"],
+                      "body-sm": ["Inter"],
+                      "display-lg": ["Inter"],
+                      "code-sm": ["JetBrains Mono"],
+                      "status-nano": ["Inter"]
+              },
+              "fontSize": {
+                      "headline-md": ["20px", { "lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                      "label-caps": ["11px", { "lineHeight": "1.0", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                      "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                      "display-lg": ["32px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                      "code-sm": ["12px", { "lineHeight": "1.4", "fontWeight": "400" }],
+                      "status-nano": ["9px", { "lineHeight": "1.0", "fontWeight": "500" }]
+              }
+            },
+          }
+        }
+    </script>
+<style type="text/tailwindcss">
+        @layer utilities {
+            .scrollbar-hide::-webkit-scrollbar { display: none; }
+            .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+            .matrix-bg { background-image: radial-gradient(circle at 2px 2px, theme('colors.outline-variant') 1px, transparent 0); background-size: 16px 16px; }
+        }
+    </style>
+</head>
+<body class="bg-surface-container-lowest text-on-surface font-body-sm h-screen w-screen overflow-hidden flex flex-col antialiased selection:bg-primary-container selection:text-on-primary-container">
+<!-- Top Header -->
+<header class="h-16 shrink-0 bg-surface border-b border-outline-variant flex items-center justify-between px-container-padding z-10">
+<div class="flex items-center gap-gutter">
+<div class="w-8 h-8 bg-surface-container-highest border border-outline-variant rounded flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">router</span>
+</div>
+<div>
+<h1 class="font-headline-md text-headline-md text-on-surface">Video Input Routing</h1>
+<div class="flex items-center gap-2 mt-0.5">
+<span class="w-2 h-2 rounded-full bg-status-online shadow-[0_0_8px_theme('colors.status-online')]"></span>
+<span class="font-status-nano text-status-nano text-on-surface-variant uppercase tracking-widest">System Nominal // 6 Sources Detected</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-gutter">
+<button class="h-8 px-4 bg-surface-container border border-outline-variant text-on-surface font-label-caps text-label-caps rounded hover:bg-surface-container-high transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px]">refresh</span>
+                RESCAN BUS
+            </button>
+<button class="h-8 px-6 bg-primary text-on-primary font-label-caps text-label-caps rounded hover:bg-primary-fixed transition-colors shadow-[0_0_12px_theme('colors.primary-container')] flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;">save</span>
+                SAVE PRESET
+            </button>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden h-full">
+<!-- Shared SideNavBar Component (Immutable extraction) -->
+<div class="w-[240px] shrink-0 border-r border-outline-variant bg-surface flex flex-col overflow-y-auto scrollbar-hide z-10">
+<div class="flex flex-col gap-2 p-4">
+<div class="flex items-center gap-3 px-3 py-2">
+<div class="text-on-surface-variant"><span class="material-symbols-outlined">home</span></div>
+<p class="text-on-surface-variant text-sm font-medium leading-normal">Dashboard</p>
+</div>
+<div class="flex items-center gap-3 px-3 py-2 rounded bg-surface-container-highest border border-outline-variant">
+<div class="text-primary"><span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">videocam</span></div>
+<p class="text-primary text-sm font-medium leading-normal">Video Input</p>
+</div>
+<div class="flex items-center gap-3 px-3 py-2">
+<div class="text-on-surface-variant"><span class="material-symbols-outlined">tune</span></div>
+<p class="text-on-surface-variant text-sm font-medium leading-normal">Audio Mixer</p>
+</div>
+<div class="flex items-center gap-3 px-3 py-2">
+<div class="text-on-surface-variant"><span class="material-symbols-outlined">cell_tower</span></div>
+<p class="text-on-surface-variant text-sm font-medium leading-normal">Output Routing</p>
+</div>
+<div class="flex items-center gap-3 px-3 py-2">
+<div class="text-on-surface-variant"><span class="material-symbols-outlined">settings</span></div>
+<p class="text-on-surface-variant text-sm font-medium leading-normal">Settings</p>
+</div>
+</div>
+</div>
+<!-- Main Workspace: Tight Grid Panel System -->
+<main class="flex-1 flex gap-panel-margin bg-outline-variant p-panel-margin overflow-hidden">
+<!-- Panel 1: Input Discovery Matrix -->
+<section class="flex flex-col w-[400px] bg-surface rounded-l shrink-0 h-full overflow-hidden">
+<header class="h-10 bg-surface-container-high border-b border-outline flex items-center px-3 shrink-0">
+<h2 class="font-label-caps text-label-caps text-on-surface">INPUT DISCOVERY MATRIX</h2>
+<div class="ml-auto flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">filter_list</span>
+</div>
+</header>
+<div class="flex-1 overflow-y-auto scrollbar-hide bg-surface-dim">
+<!-- Table Header -->
+<div class="grid grid-cols-[1fr_80px_60px] px-3 py-2 bg-surface-container text-on-surface-variant font-label-caps text-status-nano border-b border-outline-variant sticky top-0 z-10">
+<div>SOURCE / ID</div>
+<div class="text-right">FORMAT</div>
+<div class="text-right">STAT</div>
+</div>
+<!-- Row 1 (Active/Selected) -->
+<button class="w-full text-left grid grid-cols-[1fr_80px_60px] items-center px-3 py-3 border-b border-outline-variant bg-surface-container hover:bg-surface-container-high transition-colors group cursor-pointer relative">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-primary"></div>
+<div class="flex flex-col gap-0.5 pl-2">
+<span class="font-code-sm text-code-sm text-primary group-hover:text-primary-fixed truncate">Studio Cam 1</span>
+<span class="font-status-nano text-status-nano text-on-surface-variant">NDI // 192.168.1.45</span>
+</div>
+<div class="flex flex-col items-end gap-0.5">
+<span class="font-code-sm text-[10px] text-on-surface">2160p</span>
+<span class="font-status-nano text-status-nano text-on-surface-variant">59.94</span>
+</div>
+<div class="flex justify-end pr-1">
+<span class="w-2.5 h-2.5 rounded-full bg-status-online shadow-[0_0_6px_theme('colors.status-online')]"></span>
+</div>
+</button>
+<!-- Row 2 -->
+<button class="w-full text-left grid grid-cols-[1fr_80px_60px] items-center px-3 py-3 border-b border-outline-variant hover:bg-surface-container transition-colors group cursor-pointer">
+<div class="flex flex-col gap-0.5 pl-2">
+<span class="font-code-sm text-code-sm text-on-surface group-hover:text-white truncate">PTZ-02 (Balcony)</span>
+<span class="font-status-nano text-status-nano text-on-surface-variant">NDI // 192.168.1.46</span>
+</div>
+<div class="flex flex-col items-end gap-0.5">
+<span class="font-code-sm text-[10px] text-on-surface">1080p</span>
+<span class="font-status-nano text-status-nano text-on-surface-variant">29.97</span>
+</div>
+<div class="flex justify-end pr-1">
+<span class="w-2.5 h-2.5 rounded-full bg-status-online"></span>
+</div>
+</button>
+<!-- Row 3 -->
+<button class="w-full text-left grid grid-cols-[1fr_80px_60px] items-center px-3 py-3 border-b border-outline-variant hover:bg-surface-container transition-colors group cursor-pointer">
+<div class="flex flex-col gap-0.5 pl-2">
+<span class="font-code-sm text-code-sm text-on-surface group-hover:text-white truncate">DeckLink SDI 1</span>
+<span class="font-status-nano text-status-nano text-on-surface-variant">SDI // BNC-1</span>
+</div>
+<div class="flex flex-col items-end gap-0.5">
+<span class="font-code-sm text-[10px] text-on-surface">1080i</span>
+<span class="font-status-nano text-status-nano text-on-surface-variant">59.94</span>
+</div>
+<div class="flex justify-end pr-1">
+<span class="w-2.5 h-2.5 rounded-full bg-secondary"></span>
+</div>
+</button>
+<!-- Row 4 (Offline) -->
+<button class="w-full text-left grid grid-cols-[1fr_80px_60px] items-center px-3 py-3 border-b border-outline-variant hover:bg-surface-container transition-colors group cursor-pointer opacity-50">
+<div class="flex flex-col gap-0.5 pl-2">
+<span class="font-code-sm text-code-sm text-on-surface truncate">MacBook Presenter</span>
+<span class="font-status-nano text-status-nano text-status-emergency">HDMI 1 // NO SIGNAL</span>
+</div>
+<div class="flex flex-col items-end gap-0.5">
+<span class="font-code-sm text-[10px] text-on-surface-variant">---</span>
+<span class="font-status-nano text-status-nano text-on-surface-variant">---</span>
+</div>
+<div class="flex justify-end pr-1">
+<span class="w-2.5 h-2.5 rounded-full bg-status-emergency shadow-[0_0_4px_theme('colors.status-emergency')]"></span>
+</div>
+</button>
+<!-- Virtual Source -->
+<button class="w-full text-left grid grid-cols-[1fr_80px_60px] items-center px-3 py-3 border-b border-outline-variant hover:bg-surface-container transition-colors group cursor-pointer">
+<div class="flex flex-col gap-0.5 pl-2">
+<span class="font-code-sm text-code-sm text-tertiary truncate">ProPresenter Alpha</span>
+<span class="font-status-nano text-status-nano text-on-surface-variant">VIRTUAL // SYPHON</span>
+</div>
+<div class="flex flex-col items-end gap-0.5">
+<span class="font-code-sm text-[10px] text-on-surface">2160p</span>
+<span class="font-status-nano text-status-nano text-on-surface-variant">60.00</span>
+</div>
+<div class="flex justify-end pr-1">
+<span class="w-2.5 h-2.5 rounded-full border border-tertiary bg-transparent"></span>
+</div>
+</button>
+</div>
+<div class="h-12 bg-surface-container-highest border-t border-outline flex items-center justify-between px-3 shrink-0">
+<span class="font-status-nano text-status-nano text-on-surface-variant">AUTO-DETECT: ON</span>
+<button class="w-6 h-6 rounded bg-surface border border-outline flex items-center justify-center hover:bg-surface-bright">
+<span class="material-symbols-outlined text-[14px] text-on-surface">add</span>
+</button>
+</div>
+</section>
+<!-- Center & Right Column Layout -->
+<div class="flex flex-col flex-1 gap-panel-margin h-full">
+<!-- Top Half: Telemetry & Preview + Routing -->
+<div class="flex gap-panel-margin h-1/2">
+<!-- Panel 2: Signal Telemetry & Preview -->
+<section class="flex-1 bg-surface rounded flex flex-col overflow-hidden relative">
+<header class="h-10 bg-surface-container-high border-b border-outline flex items-center justify-between px-3 shrink-0 z-10 absolute top-0 left-0 right-0 bg-opacity-80 backdrop-blur">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-status-online shadow-[0_0_8px_theme('colors.status-online')]"></span>
+<h2 class="font-label-caps text-label-caps text-on-surface drop-shadow-md">STUDIO CAM 1 [LIVE]</h2>
+</div>
+<div class="flex gap-2">
+<span class="font-code-sm text-[10px] text-primary bg-primary-fixed-dim bg-opacity-20 px-1.5 py-0.5 rounded border border-primary opacity-80">REC</span>
+<span class="font-code-sm text-[10px] text-on-surface bg-surface-dim px-1.5 py-0.5 rounded border border-outline">LUT: OFF</span>
+</div>
+</header>
+<!-- Main Preview Area -->
+<div class="flex-1 bg-live-preview-bg matrix-bg relative flex items-center justify-center p-4 pt-14">
+<!-- Simulated Video Feed -->
+<div class="w-full max-w-[80%] aspect-video bg-surface-container-lowest border border-outline-variant shadow-2xl relative overflow-hidden group">
+<img alt="Video Preview" class="w-full h-full object-cover opacity-80 mix-blend-screen" data-alt="A highly detailed close-up shot of a modern electronic circuit board, heavily stylized with intense, glowing matrix-green lighting against pitch-black shadows. The camera is shallow focus, highlighting tiny resistors and capacitors that gleam under harsh, technical LEDs. The mood is cyberpunk and industrial, strictly adhering to a dark mode aesthetic with extreme contrast." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAgT2lBmfR5GhOx1WBEUrQfpRQW3LoVFpcImJPnIJyUohShfr-J5eIVWB75hnUzFopOsPCbv2H6rfqv445I9kqbepaF9AOXCPuU-ZfdXMsp4MtUQdeXz8Tbol2py-Hct2fYeyCu_UkjNTaBeqO-bZt9xex-RblwajOSYSTG7RYGv8zASwGgskeu4iwZEO1r7mJRcvqNfJpZhrM_VY6jPeZ_yCRu6e8uaNPOqvJULlFVsvions5sMcIny74ddPnbMacR0F72GO1rbFO7"/>
+<!-- Center Crosshair overlay -->
+<div class="absolute inset-0 pointer-events-none flex items-center justify-center opacity-30">
+<div class="w-full h-[1px] bg-primary absolute"></div>
+<div class="h-full w-[1px] bg-primary absolute"></div>
+<div class="w-12 h-12 border border-primary rounded-full absolute"></div>
+</div>
+</div>
+</div>
+<!-- Scopes Bar -->
+<div class="h-24 bg-surface-dim border-t border-outline flex gap-panel-margin shrink-0">
+<!-- Waveform -->
+<div class="flex-1 bg-surface-container-lowest relative overflow-hidden p-1">
+<div class="absolute top-1 left-1 font-status-nano text-status-nano text-on-surface-variant z-10">WFM / LUMA</div>
+<!-- Fake scope graphic using pure CSS gradients -->
+<div class="w-full h-full bg-[linear-gradient(0deg,theme('colors.primary')_0%,transparent_100%)] opacity-30 style='mask-image: repeating-linear-gradient(90deg, black 0px, black 1px, transparent 1px, transparent 4px);'"></div>
+<div class="absolute inset-0 flex items-end justify-center pb-2 opacity-50">
+<svg height="60%" preserveaspectratio="none" viewbox="0 0 100 50" width="80%">
+<path d="M0,50 Q10,10 20,40 T40,20 T60,45 T80,15 T100,50" fill="none" stroke="theme('colors.primary')" stroke-dasharray="2 1" stroke-width="1.5"></path>
+<path d="M0,50 Q15,20 30,35 T50,10 T70,40 T90,20 T100,50" fill="none" stroke="theme('colors.primary-fixed')" stroke-width="1"></path>
+</svg>
+</div>
+</div>
+<!-- Vectorscope -->
+<div class="w-32 bg-surface-container-lowest relative overflow-hidden flex items-center justify-center border-l border-outline-variant">
+<div class="absolute top-1 left-1 font-status-nano text-status-nano text-on-surface-variant">VECTOR</div>
+<div class="w-16 h-16 rounded-full border border-outline-variant relative">
+<div class="absolute inset-0 flex items-center justify-center">
+<div class="w-full h-[1px] bg-outline-variant opacity-50"></div>
+<div class="h-full w-[1px] bg-outline-variant opacity-50 absolute"></div>
+</div>
+<!-- Fake color splatter -->
+<div class="absolute top-1/2 left-1/2 w-8 h-6 bg-primary opacity-40 blur-[4px] -translate-x-2 -translate-y-4 rounded-[40%]"></div>
+<div class="absolute top-1/2 left-1/2 w-6 h-8 bg-secondary opacity-30 blur-[3px] -translate-x-1 translate-y-1 rounded-[60%]"></div>
+</div>
+</div>
+</div>
+</section>
+<!-- Panel 3: Routing Matrix -->
+<section class="w-64 bg-surface rounded flex flex-col shrink-0">
+<header class="h-10 bg-surface-container-high border-b border-outline flex items-center px-3 shrink-0">
+<h2 class="font-label-caps text-label-caps text-on-surface">PATCH &amp; ROUTE</h2>
+</header>
+<div class="flex-1 p-3 flex flex-col gap-4 overflow-y-auto">
+<!-- Destination 1 -->
+<div class="flex flex-col gap-2">
+<label class="font-status-nano text-status-nano text-on-surface-variant flex justify-between">
+<span>DEST: PGM BUS (LAYER 1)</span>
+<span class="text-primary">LOCKED</span>
+</label>
+<div class="h-8 bg-surface-dim border border-primary rounded flex items-center justify-between px-2 cursor-pointer shadow-[inset_0_0_8px_rgba(16,185,129,0.1)]">
+<span class="font-code-sm text-code-sm text-primary">Studio Cam 1</span>
+<span class="material-symbols-outlined text-[14px] text-primary">arrow_drop_down</span>
+</div>
+</div>
+<!-- Destination 2 -->
+<div class="flex flex-col gap-2">
+<label class="font-status-nano text-status-nano text-on-surface-variant flex justify-between">
+<span>DEST: PIP 1 (OVERLAY)</span>
+<span>FREE</span>
+</label>
+<div class="h-8 bg-surface-container-lowest border border-outline rounded flex items-center justify-between px-2 cursor-pointer hover:border-outline-variant transition-colors">
+<span class="font-code-sm text-code-sm text-on-surface-variant">PTZ-02 (Balcony)</span>
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant">arrow_drop_down</span>
+</div>
+</div>
+<!-- Destination 3 -->
+<div class="flex flex-col gap-2">
+<label class="font-status-nano text-status-nano text-on-surface-variant flex justify-between">
+<span>DEST: ISO REC 1</span>
+<span>FREE</span>
+</label>
+<div class="h-8 bg-surface-container-lowest border border-outline border-dashed rounded flex items-center justify-center cursor-pointer hover:bg-surface-dim transition-colors">
+<span class="font-label-caps text-[10px] text-outline">UNASSIGNED</span>
+</div>
+</div>
+<div class="mt-auto pt-4 border-t border-outline-variant">
+<button class="w-full h-8 bg-surface-container-highest border border-outline hover:border-primary text-on-surface font-label-caps text-[10px] rounded flex items-center justify-center gap-2 transition-all">
+<span class="material-symbols-outlined text-[14px]">route</span>
+                                    EXECUTE PATCH
+                                </button>
+</div>
+</div>
+</section>
+</div>
+<!-- Bottom Half: Enhancement Module -->
+<section class="flex-1 bg-surface rounded flex flex-col overflow-hidden">
+<header class="h-10 bg-surface-container-high border-b border-outline flex items-center shrink-0">
+<div class="px-4 border-r border-outline-variant h-full flex items-center font-label-caps text-label-caps text-on-surface border-b-2 border-b-primary bg-surface-container">
+                            LUMA / CHROMA
+                        </div>
+<div class="px-4 border-r border-outline-variant h-full flex items-center font-label-caps text-label-caps text-on-surface-variant hover:text-on-surface cursor-pointer">
+                            SIGNAL PROC
+                        </div>
+<div class="px-4 border-r border-outline-variant h-full flex items-center font-label-caps text-label-caps text-on-surface-variant hover:text-on-surface cursor-pointer">
+                            KEYING
+                        </div>
+<div class="ml-auto px-3 flex items-center gap-3">
+<label class="flex items-center gap-2 cursor-pointer">
+<span class="font-status-nano text-status-nano text-on-surface-variant">BYPASS</span>
+<div class="w-8 h-4 bg-surface-dim border border-outline-variant rounded-full relative">
+<div class="w-3 h-3 bg-outline rounded-full absolute top-[1px] left-[1px]"></div>
+</div>
+</label>
+</div>
+</header>
+<div class="flex-1 p-4 flex gap-6 overflow-x-auto scrollbar-hide">
+<!-- Group 1: Basic Exposure -->
+<div class="flex flex-col gap-4 min-w-[200px] flex-1">
+<h3 class="font-status-nano text-status-nano text-on-surface-variant border-b border-outline-variant pb-1">EXPOSURE (PRIMARY)</h3>
+<!-- Slider Block -->
+<div class="flex flex-col gap-1">
+<div class="flex justify-between font-code-sm text-[11px] text-on-surface">
+<span>LIFT (BLACK)</span>
+<span class="text-primary">-4.2%</span>
+</div>
+<div class="h-1.5 bg-surface-dim rounded-full border border-surface-container-lowest overflow-hidden relative">
+<div class="absolute left-1/2 top-0 bottom-0 w-[1px] bg-outline-variant z-10"></div>
+<div class="h-full bg-primary absolute left-1/4 right-1/2 opacity-80"></div>
+</div>
+</div>
+<!-- Slider Block -->
+<div class="flex flex-col gap-1">
+<div class="flex justify-between font-code-sm text-[11px] text-on-surface">
+<span>GAMMA (MID)</span>
+<span>0.0%</span>
+</div>
+<div class="h-1.5 bg-surface-dim rounded-full border border-surface-container-lowest overflow-hidden relative">
+<div class="absolute left-1/2 top-0 bottom-0 w-[1px] bg-outline-variant z-10"></div>
+</div>
+</div>
+<!-- Slider Block -->
+<div class="flex flex-col gap-1">
+<div class="flex justify-between font-code-sm text-[11px] text-on-surface">
+<span>GAIN (WHITE)</span>
+<span class="text-primary">+12.5%</span>
+</div>
+<div class="h-1.5 bg-surface-dim rounded-full border border-surface-container-lowest overflow-hidden relative">
+<div class="absolute left-1/2 top-0 bottom-0 w-[1px] bg-outline-variant z-10"></div>
+<div class="h-full bg-primary absolute left-1/2 right-[20%] opacity-80"></div>
+</div>
+</div>
+</div>
+<!-- Group 2: Color Space -->
+<div class="flex flex-col gap-4 min-w-[200px] flex-1 border-l border-outline-variant pl-6">
+<h3 class="font-status-nano text-status-nano text-on-surface-variant border-b border-outline-variant pb-1">COLORIMETRY</h3>
+<div class="flex flex-col gap-1">
+<div class="flex justify-between font-code-sm text-[11px] text-on-surface">
+<span>SATURATION</span>
+<span>105%</span>
+</div>
+<div class="h-1.5 bg-surface-dim rounded-full border border-surface-container-lowest overflow-hidden relative">
+<div class="h-full bg-primary absolute left-0 right-[40%] opacity-80"></div>
+</div>
+</div>
+<div class="flex flex-col gap-1">
+<div class="flex justify-between font-code-sm text-[11px] text-on-surface">
+<span>HUE ROTATE</span>
+<span>0°</span>
+</div>
+<div class="h-1.5 bg-[linear-gradient(90deg,red,yellow,green,cyan,blue,magenta,red)] rounded-full border border-surface-container-lowest overflow-hidden relative opacity-50">
+<div class="absolute left-1/2 top-0 bottom-0 w-[2px] bg-white z-10"></div>
+</div>
+</div>
+<div class="flex flex-col gap-1">
+<div class="flex justify-between font-code-sm text-[11px] text-on-surface">
+<span>TEMP (K)</span>
+<span class="text-secondary">5600K</span>
+</div>
+<div class="h-1.5 bg-[linear-gradient(90deg,#0055ff,#ffffff,#ffaa00)] rounded-full border border-surface-container-lowest overflow-hidden relative opacity-60">
+<div class="absolute left-[60%] top-0 bottom-0 w-[2px] bg-white z-10 shadow-[0_0_4px_black]"></div>
+</div>
+</div>
+</div>
+<!-- Group 3: Detail & Noise -->
+<div class="flex flex-col gap-4 min-w-[200px] flex-1 border-l border-outline-variant pl-6">
+<h3 class="font-status-nano text-status-nano text-on-surface-variant border-b border-outline-variant pb-1">DETAIL EXTRACTION</h3>
+<div class="flex flex-col gap-1">
+<div class="flex justify-between font-code-sm text-[11px] text-on-surface">
+<span>SHARPEN (RADIUS)</span>
+<span>1.2px</span>
+</div>
+<div class="h-1.5 bg-surface-dim rounded-full border border-surface-container-lowest overflow-hidden relative">
+<div class="h-full bg-outline-variant absolute left-0 right-[70%]"></div>
+</div>
+</div>
+<div class="flex items-center justify-between mt-2">
+<span class="font-code-sm text-[11px] text-on-surface">NR (SPATIAL)</span>
+<div class="flex gap-1">
+<button class="w-8 h-5 bg-surface-dim border border-outline rounded text-[9px] font-label-caps text-on-surface-variant hover:bg-surface-bright">OFF</button>
+<button class="w-8 h-5 bg-primary border border-primary rounded text-[9px] font-label-caps text-on-primary">LOW</button>
+<button class="w-8 h-5 bg-surface-dim border border-outline rounded text-[9px] font-label-caps text-on-surface-variant hover:bg-surface-bright">HIGH</button>
+</div>
+</div>
+<div class="flex items-center justify-between">
+<span class="font-code-sm text-[11px] text-on-surface">DE-INTERLACE</span>
+<label class="flex items-center cursor-pointer">
+<div class="w-8 h-4 bg-primary border border-primary-container rounded-full relative shadow-[0_0_6px_rgba(16,185,129,0.3)]">
+<div class="w-3 h-3 bg-white rounded-full absolute top-[1px] right-[1px]"></div>
+</div>
+</label>
+</div>
+</div>
+</div>
+</section>
+</div>
+</main>
+</div>
+</body></html>

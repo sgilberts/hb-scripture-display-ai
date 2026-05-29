@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>HallelujahBeamer Control - Screen Mapping</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-fixed-dim": "#ffb95f",
+                        "surface-container-low": "#1b1b1e",
+                        "error": "#ffb4ab",
+                        "on-secondary-fixed-variant": "#653e00",
+                        "on-tertiary-fixed-variant": "#3a485c",
+                        "primary": "#4edea3",
+                        "outline": "#86948a",
+                        "on-primary-container": "#00422b",
+                        "on-error": "#690005",
+                        "live-preview-bg": "#000000",
+                        "on-primary-fixed-variant": "#005236",
+                        "on-tertiary-fixed": "#0d1c2f",
+                        "surface-container-high": "#2a2a2d",
+                        "secondary-container": "#ee9800",
+                        "on-secondary-fixed": "#2a1700",
+                        "on-surface-variant": "#bbcabf",
+                        "surface-container": "#1f1f22",
+                        "on-surface": "#e4e1e6",
+                        "primary-container": "#10b981",
+                        "inverse-primary": "#006c49",
+                        "on-primary": "#003824",
+                        "error-container": "#93000a",
+                        "surface-container-lowest": "#0e0e11",
+                        "tertiary-fixed": "#d5e3fd",
+                        "secondary": "#ffb95f",
+                        "background": "#131316",
+                        "secondary-fixed": "#ffddb8",
+                        "surface-container-highest": "#353438",
+                        "surface-dim": "#131316",
+                        "tertiary-fixed-dim": "#b9c7e0",
+                        "status-emergency": "#93000a",
+                        "on-background": "#e4e1e6",
+                        "outline-variant": "#3c4a42",
+                        "on-tertiary": "#233144",
+                        "tertiary-container": "#95a4bb",
+                        "on-secondary": "#472a00",
+                        "surface-variant": "#353438",
+                        "primary-fixed-dim": "#4edea3",
+                        "tertiary": "#b9c7e0",
+                        "on-tertiary-container": "#2c3a4e",
+                        "primary-fixed": "#6ffbbe",
+                        "surface": "#131316",
+                        "on-primary-fixed": "#002113",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-container": "#5b3800",
+                        "surface-bright": "#39393c",
+                        "status-online": "#4edea3",
+                        "surface-tint": "#4edea3",
+                        "inverse-surface": "#e4e1e6",
+                        "inverse-on-surface": "#303033"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "panel-margin": "1px",
+                        "unit": "4px",
+                        "component-gap": "4px",
+                        "container-padding": "12px",
+                        "gutter": "8px"
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; background-color: #131316; color: #e4e1e6; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .technical-mono { font-family: 'JetBrains Mono', monospace; }
+        .panel-border { border: 1px solid #3c4a42; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .glow-active { box-shadow: 0 0 10px rgba(78, 222, 163, 0.3); }
+        .grid-canvas { background-size: 20px 20px; background-image: radial-gradient(circle, #3c4a42 1px, transparent 1px); }
+    </style>
+</head>
+<body class="overflow-hidden">
+<div class="flex h-screen w-full bg-surface-container-lowest text-on-surface">
+<!-- Sidebar -->
+<aside class="w-[280px] flex flex-col border-r border-outline-variant bg-surface">
+<div class="p-6 flex items-center gap-3">
+<div class="size-8 text-primary">
+<svg fill="none" viewbox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+<path d="M24 45.8096C19.6865 45.8096 15.4698 44.5305 11.8832 42.134C8.29667 39.7376 5.50128 36.3314 3.85056 32.3462C2.19985 28.361 1.76794 23.9758 2.60947 19.7452C3.451 15.5145 5.52816 11.6284 8.57829 8.5783C11.6284 5.52817 15.5145 3.45101 19.7452 2.60948C23.9758 1.76795 28.361 2.19986 32.3462 3.85057C36.3314 5.50129 39.7376 8.29668 42.134 11.8833C44.5305 15.4698 45.8096 19.6865 45.8096 24L24 24L24 45.8096Z" fill="currentColor"></path>
+</svg>
+</div>
+<div>
+<h2 class="text-on-surface font-bold text-lg tracking-tight">HallelujahBeamer</h2>
+<p class="text-on-surface-variant technical-mono text-[10px] tracking-widest uppercase">V3.1.0-EMERALD</p>
+</div>
+</div>
+<nav class="flex-1 px-3 space-y-1">
+<div class="group flex items-center gap-3 px-4 py-3 rounded hover:bg-surface-container cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant">monitor</span>
+<span class="text-body-sm font-medium">General Display</span>
+</div>
+<div class="group flex items-center gap-3 px-4 py-3 rounded hover:bg-surface-container cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant">database</span>
+<span class="text-body-sm font-medium">Bible &amp; Ingestion</span>
+</div>
+<div class="group flex items-center gap-3 px-4 py-3 rounded hover:bg-surface-container cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant">share</span>
+<span class="text-body-sm font-medium">NDI Pipeline</span>
+</div>
+<div class="group flex items-center gap-3 px-4 py-3 rounded bg-primary-container text-on-primary-container cursor-default">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">grid_4x4</span>
+<span class="text-body-sm font-bold">Screen Mapping</span>
+</div>
+</nav>
+<div class="p-4 border-t border-outline-variant bg-surface-container-low">
+<div class="flex items-center gap-3">
+<div class="size-10 rounded-full bg-surface-bright flex items-center justify-center">
+<span class="material-symbols-outlined text-primary">person</span>
+</div>
+<div class="flex-1">
+<p class="text-body-sm font-bold truncate">Admin Node</p>
+<p class="text-status-nano text-primary uppercase">System Ready</p>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer">settings</span>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col overflow-hidden bg-surface-dim">
+<!-- Top Bar -->
+<header class="h-16 border-b border-outline-variant px-8 flex items-center justify-between bg-surface-container">
+<div class="flex items-center gap-4">
+<h1 class="text-headline-md font-bold">Screen Mapping Settings</h1>
+<div class="px-2 py-0.5 bg-outline-variant rounded technical-mono text-[10px] text-on-surface-variant">NODE: 0x4F-ALPHA</div>
+</div>
+<div class="flex items-center gap-3">
+<button class="px-4 py-2 bg-surface-bright rounded text-label-caps uppercase hover:bg-surface-container-high transition-colors">Export Config</button>
+<div class="h-6 w-[1px] bg-outline-variant"></div>
+<div class="flex items-center gap-2">
+<span class="status-dot bg-status-online glow-active"></span>
+<span class="text-label-caps uppercase tracking-widest text-primary">Live Output Active</span>
+</div>
+</div>
+</header>
+<!-- Scrollable Dashboard -->
+<div class="flex-1 overflow-y-auto p-8 space-y-6">
+<!-- Display Arrangement Canvas -->
+<section class="bg-surface-container rounded-lg border border-outline-variant overflow-hidden shadow-2xl">
+<div class="p-4 border-b border-outline-variant flex justify-between items-center bg-surface-container-high">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">aspect_ratio</span>
+<h2 class="text-label-caps uppercase tracking-widest font-bold">Display Arrangement</h2>
+</div>
+<div class="flex items-center gap-4">
+<span class="text-status-nano text-on-surface-variant">SNAPPING ENABLED</span>
+<div class="flex gap-1">
+<button class="size-8 flex items-center justify-center bg-surface-bright rounded hover:bg-primary transition-all"><span class="material-symbols-outlined text-sm">zoom_in</span></button>
+<button class="size-8 flex items-center justify-center bg-surface-bright rounded hover:bg-primary transition-all"><span class="material-symbols-outlined text-sm">zoom_out</span></button>
+</div>
+</div>
+</div>
+<div class="h-[320px] grid-canvas relative flex items-center justify-center p-12">
+<!-- Virtual Displays -->
+<div class="relative w-full h-full max-w-4xl mx-auto border border-dashed border-outline rounded flex items-center justify-center">
+<div class="absolute top-4 left-4 text-status-nano text-outline uppercase">Virtual Stage Space</div>
+<div class="flex gap-4 items-end">
+<!-- Display 1 -->
+<div class="w-64 aspect-video bg-live-preview-bg border-2 border-primary rounded shadow-xl flex flex-col p-3 cursor-move relative group ring-4 ring-primary/20">
+<div class="absolute -top-3 -right-3 size-6 bg-primary text-on-primary rounded-full flex items-center justify-center shadow-lg"><span class="material-symbols-outlined text-xs">drag_indicator</span></div>
+<div class="flex-1 flex items-center justify-center">
+<div class="text-center">
+<p class="technical-mono text-primary font-bold">PRIMARY MONITOR</p>
+<p class="text-status-nano text-on-surface-variant">ID: DISP_01</p>
+</div>
+</div>
+<div class="flex justify-between items-end">
+<span class="text-status-nano technical-mono">1920 x 1080</span>
+<span class="text-status-nano technical-mono text-primary">HDMI-1</span>
+</div>
+</div>
+<!-- Display 2 -->
+<div class="w-72 aspect-[21/9] bg-live-preview-bg border border-outline rounded flex flex-col p-3 cursor-move opacity-80 hover:opacity-100 transition-opacity">
+<div class="flex-1 flex items-center justify-center">
+<div class="text-center">
+<p class="technical-mono text-on-surface font-bold">LED WALL - STAGE LEFT</p>
+<p class="text-status-nano text-on-surface-variant">ID: DISP_02</p>
+</div>
+</div>
+<div class="flex justify-between items-end">
+<span class="text-status-nano technical-mono">1920 x 1080</span>
+<span class="text-status-nano technical-mono">NDI-4</span>
+</div>
+</div>
+<!-- Display 3 -->
+<div class="w-48 aspect-video bg-live-preview-bg border border-outline rounded flex flex-col p-3 cursor-move opacity-80 hover:opacity-100 transition-opacity">
+<div class="flex-1 flex items-center justify-center">
+<div class="text-center">
+<p class="technical-mono text-on-surface font-bold">STAGE DISPLAY</p>
+<p class="text-status-nano text-on-surface-variant">ID: DISP_03</p>
+</div>
+</div>
+<div class="flex justify-between items-end">
+<span class="text-status-nano technical-mono">1280 x 720</span>
+<span class="text-status-nano technical-mono">DP-2</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+<!-- Output Routing Matrix -->
+<section class="bg-surface-container rounded-lg border border-outline-variant flex flex-col">
+<div class="p-4 border-b border-outline-variant flex items-center gap-2 bg-surface-container-high">
+<span class="material-symbols-outlined text-primary">hub</span>
+<h2 class="text-label-caps uppercase tracking-widest font-bold">Output Routing Matrix</h2>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left technical-mono text-[12px]">
+<thead>
+<tr class="border-b border-outline-variant bg-surface-container-low text-on-surface-variant">
+<th class="p-4 font-normal">SOFTWARE LAYER</th>
+<th class="p-4 font-normal">HARDWARE DESTINATION</th>
+<th class="p-4 font-normal">STATUS</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="p-4 font-bold text-primary">BIBLE TEXT</td>
+<td class="p-4">Display 1 (HDMI-1)</td>
+<td class="p-4">
+<div class="flex items-center gap-2 text-primary">
+<span class="status-dot bg-primary"></span>
+                                            CONNECTED
+                                        </div>
+</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="p-4 font-bold text-primary">SONG LYRICS</td>
+<td class="p-4">LED Wall (NDI-4)</td>
+<td class="p-4">
+<div class="flex items-center gap-2 text-primary">
+<span class="status-dot bg-primary"></span>
+                                            CONNECTED
+                                        </div>
+</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="p-4 font-bold text-secondary">LOWER THIRDS</td>
+<td class="p-4">NDI Output 1</td>
+<td class="p-4">
+<div class="flex items-center gap-2 text-outline">
+<span class="status-dot bg-outline"></span>
+                                            STANDBY
+                                        </div>
+</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="p-4 font-bold text-error">EMERGENCY SLIDE</td>
+<td class="p-4">All Outputs</td>
+<td class="p-4">
+<div class="flex items-center gap-2 text-error">
+<span class="status-dot bg-error animate-pulse"></span>
+                                            OFFLINE
+                                        </div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- Coordinate Calibration -->
+<section class="bg-surface-container rounded-lg border border-outline-variant flex flex-col">
+<div class="p-4 border-b border-outline-variant flex items-center justify-between bg-surface-container-high">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">architecture</span>
+<h2 class="text-label-caps uppercase tracking-widest font-bold">Coordinate Calibration</h2>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-label-caps text-on-surface-variant">TEST PATTERN</span>
+<button class="w-10 h-5 bg-surface-bright rounded-full relative transition-colors duration-200" id="test-pattern-btn">
+<span class="absolute left-1 top-1 w-3 h-3 bg-on-surface-variant rounded-full transition-all duration-200" id="toggle-thumb"></span>
+</button>
+</div>
+</div>
+<div class="p-6 space-y-6">
+<div class="grid grid-cols-2 gap-4">
+<div class="space-y-2">
+<label class="text-label-caps text-on-surface-variant">X OFFSET (PX)</label>
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded p-3 technical-mono focus:border-primary outline-none text-primary" type="number" value="0"/>
+</div>
+<div class="space-y-2">
+<label class="text-label-caps text-on-surface-variant">Y OFFSET (PX)</label>
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded p-3 technical-mono focus:border-primary outline-none text-primary" type="number" value="0"/>
+</div>
+<div class="space-y-2">
+<label class="text-label-caps text-on-surface-variant">SCALE (%)</label>
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded p-3 technical-mono focus:border-primary outline-none text-primary" type="number" value="100"/>
+</div>
+<div class="space-y-2">
+<label class="text-label-caps text-on-surface-variant">ROTATION (DEG)</label>
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded p-3 technical-mono focus:border-primary outline-none text-primary" type="number" value="0"/>
+</div>
+</div>
+<div class="bg-surface-container-lowest border border-outline-variant p-4 rounded">
+<div class="flex items-center justify-between mb-2">
+<span class="text-label-caps text-on-surface-variant">KEYSTONE ALIGNMENT</span>
+<span class="text-status-nano text-primary">ADVANCED MODE</span>
+</div>
+<div class="grid grid-cols-4 gap-2">
+<div class="h-12 border border-outline-variant bg-surface-container flex items-center justify-center text-on-surface-variant text-xs">TL</div>
+<div class="h-12 border border-outline-variant bg-surface-container flex items-center justify-center text-on-surface-variant text-xs">TR</div>
+<div class="h-12 border border-outline-variant bg-surface-container flex items-center justify-center text-on-surface-variant text-xs">BL</div>
+<div class="h-12 border border-outline-variant bg-surface-container flex items-center justify-center text-on-surface-variant text-xs">BR</div>
+</div>
+</div>
+</div>
+</section>
+</div>
+</div>
+<!-- Footer Actions -->
+<footer class="h-20 border-t border-outline-variant px-8 flex items-center justify-between bg-surface-container-high">
+<div class="flex gap-4">
+<button class="flex items-center gap-2 px-6 py-2 border border-outline rounded text-label-caps hover:bg-surface-bright transition-all">
+<span class="material-symbols-outlined text-sm">refresh</span>
+                    RESET DEFAULTS
+                </button>
+<button class="flex items-center gap-2 px-6 py-2 border border-error text-error rounded text-label-caps hover:bg-error/10 transition-all">
+<span class="material-symbols-outlined text-sm">emergency_home</span>
+                    CLEAR ALL OUTPUTS
+                </button>
+</div>
+<div class="flex gap-4">
+<button class="px-8 py-2 text-on-surface rounded text-label-caps hover:underline">CANCEL</button>
+<button class="px-10 py-3 bg-primary text-on-primary font-black rounded-lg text-label-caps shadow-lg hover:brightness-110 active:scale-95 transition-all">
+                    SAVE CONFIGURATION &amp; APPLY
+                </button>
+</div>
+</footer>
+</main>
+</div>
+<script>
+    // Micro-interactions
+    const testPatternBtn = document.getElementById('test-pattern-btn');
+    const toggleThumb = document.getElementById('toggle-thumb');
+    let isPatternOn = false;
+
+    testPatternBtn.addEventListener('click', () => {
+        isPatternOn = !isPatternOn;
+        if(isPatternOn) {
+            testPatternBtn.classList.remove('bg-surface-bright');
+            testPatternBtn.classList.add('bg-primary-container');
+            toggleThumb.classList.remove('left-1', 'bg-on-surface-variant');
+            toggleThumb.classList.add('left-6', 'bg-on-primary-container');
+        } else {
+            testPatternBtn.classList.add('bg-surface-bright');
+            testPatternBtn.classList.remove('bg-primary-container');
+            toggleThumb.classList.add('left-1', 'bg-on-surface-variant');
+            toggleThumb.classList.remove('left-6', 'bg-on-primary-container');
+        }
+    });
+
+    // Cosmetic atmospheric effect for display canvas
+    const displays = document.querySelectorAll('.cursor-move');
+    displays.forEach(display => {
+        display.addEventListener('mousedown', () => {
+            display.style.transform = 'scale(1.02)';
+            display.classList.add('z-50');
+        });
+        display.addEventListener('mouseup', () => {
+            display.style.transform = 'scale(1)';
+            display.classList.remove('z-50');
+        });
+    });
+</script>
+</body></html>
