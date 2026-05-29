@@ -44,11 +44,15 @@ jobs:
           else
             tar czf deepspeech-linux-x64.tgz -C node_modules/deepspeech/lib/binding v0.9.3
           fi
+          echo "Created artifacts:"
+          ls -la deepspeech-*.tgz || true
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: deepspeech-linux-x64
-          path: deepspeech-linux-x64-node-v137.tgz,deepspeech-linux-x64.tgz
+          path: |
+            deepspeech-linux-x64-node-v137.tgz
+            deepspeech-linux-x64.tgz
 
   build-windows:
     name: Build Windows x64
@@ -96,7 +100,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: deepspeech-windows-x64
-          path: deepspeech-windows-x64-node-v137.zip,deepspeech-windows-x64.zip
+          path: |
+            deepspeech-windows-x64-node-v137.zip
+            deepspeech-windows-x64.zip
 
   build-macos:
     name: Build macOS (arm64 recommended)
@@ -139,7 +145,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: deepspeech-macos-arm64
-          path: deepspeech-macos-arm64-node-v137.tgz,deepspeech-macos-arm64.tgz
+          path: |
+            deepspeech-macos-arm64-node-v137.tgz
+            deepspeech-macos-arm64.tgz
 
 # Notes:
 # - Trigger this workflow from the Actions UI (Run workflow) or via repository_dispatch.
