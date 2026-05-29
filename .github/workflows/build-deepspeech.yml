@@ -30,17 +30,25 @@ jobs:
             npm_config_arch=$TARGET_ARCH \
             npm_config_disturl=https://electronjs.org/headers \
             npm rebuild deepspeech --loglevel verbose
+          # Ensure electron-rebuild produces the correct node-abi folder (node-v137 for Electron v35)
+          npx electron-rebuild -f -w deepspeech --version $ELECTRON_VERSION || true
       - name: Package artifact
         run: |
           set -euo pipefail
+          # Prefer packaging the specific node-abi folder node-v137 if present
           BINDING_ROOT=node_modules/deepspeech/lib/binding/v0.9.3
           if [ ! -d "$BINDING_ROOT" ]; then echo "Binding root not found: $BINDING_ROOT"; ls -la node_modules/deepspeech || true; exit 1; fi
-          tar czf deepspeech-linux-x64.tgz -C node_modules/deepspeech/lib/binding v0.9.3
+          # If node-v137 exists, package only that; otherwise package entire v0.9.3 folder
+          if [ -d "$BINDING_ROOT/node-v137" ]; then
+            tar czf deepspeech-linux-x64-node-v137.tgz -C "$BINDING_ROOT" node-v137
+          else
+            tar czf deepspeech-linux-x64.tgz -C node_modules/deepspeech/lib/binding v0.9.3
+          fi
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: deepspeech-linux-x64
-          path: deepspeech-linux-x64.tgz
+          path: deepspeech-linux-x64-node-v137.tgz,deepspeech-linux-x64.tgz
 
   build-windows:
     name: Build Windows x64
@@ -68,17 +76,27 @@ jobs:
             npm_config_arch=$TARGET_ARCH \
             npm_config_disturl=https://electronjs.org/headers \
             npm rebuild deepspeech --loglevel verbose
+          npx electron-rebuild -f -w deepspeech --version $ELECTRON_VERSION || true
       - name: Package artifact (zip)
+        shell: powershell
         run: |
-          powershell -NoProfile -Command "\
-            $bindingRoot = 'node_modules\\deepspeech\\lib\\binding\\v0.9.3'; \
-            if (-not (Test-Path $bindingRoot)) { Write-Error 'Binding root not found'; exit 1 }; \
-            Compress-Archive -Path $bindingRoot -DestinationPath deepspeech-windows-x64.zip -Force"
+          $bindingRoot = 'node_modules\\deepspeech\\lib\\binding\\v0.9.3'
+          if (-not (Test-Path $bindingRoot)) { Write-Error "Binding root not found: $bindingRoot"; exit 1 }
+          # If a node-abi folder for node-v137 exists, package it specifically
+          $nodeFolder = Join-Path $bindingRoot 'node-v137'
+          if (Test-Path $nodeFolder) {
+            Compress-Archive -Path $nodeFolder -DestinationPath deepspeech-windows-x64-node-v137.zip -Force
+            $out = 'deepspeech-windows-x64-node-v137.zip'
+          } else {
+            Compress-Archive -Path $bindingRoot -DestinationPath deepspeech-windows-x64.zip -Force
+            $out = 'deepspeech-windows-x64.zip'
+          }
+          Write-Output "Packaged $out"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: deepspeech-windows-x64
-          path: deepspeech-windows-x64.zip
+          path: deepspeech-windows-x64-node-v137.zip,deepspeech-windows-x64.zip
 
   build-macos:
     name: Build macOS (arm64 recommended)
@@ -106,17 +124,22 @@ jobs:
             npm_config_arch=$TARGET_ARCH \
             npm_config_disturl=https://electronjs.org/headers \
             npm rebuild deepspeech --loglevel verbose
+          npx electron-rebuild -f -w deepspeech --version $ELECTRON_VERSION || true
       - name: Package artifact
         run: |
           set -euo pipefail
           BINDING_ROOT=node_modules/deepspeech/lib/binding/v0.9.3
           if [ ! -d "$BINDING_ROOT" ]; then echo "Binding root not found: $BINDING_ROOT"; ls -la node_modules/deepspeech || true; exit 1; fi
-          tar czf deepspeech-macos-arm64.tgz -C node_modules/deepspeech/lib/binding v0.9.3
+          if [ -d "$BINDING_ROOT/node-v137" ]; then
+            tar czf deepspeech-macos-arm64-node-v137.tgz -C "$BINDING_ROOT" node-v137
+          else
+            tar czf deepspeech-macos-arm64.tgz -C node_modules/deepspeech/lib/binding v0.9.3
+          fi
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: deepspeech-macos-arm64
-          path: deepspeech-macos-arm64.tgz
+          path: deepspeech-macos-arm64-node-v137.tgz,deepspeech-macos-arm64.tgz
 
 # Notes:
 # - Trigger this workflow from the Actions UI (Run workflow) or via repository_dispatch.
