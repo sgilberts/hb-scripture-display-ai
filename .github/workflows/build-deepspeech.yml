@@ -1,0 +1,124 @@
+name: Build DeepSpeech native bindings
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build-linux:
+    name: Build Linux x64
+    runs-on: ubuntu-22.04
+    env:
+      ELECTRON_VERSION: '35.5.1'
+      TARGET_ARCH: x64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm ci
+      - name: Rebuild deepspeech native binding (Linux x64)
+        run: |
+          set -euo pipefail
+          echo "ELECTRON_VERSION=$ELECTRON_VERSION"
+          echo "TARGET_ARCH=$TARGET_ARCH"
+          # Force build-from-source for the native binding against Electron headers
+          npm_config_build_from_source=true \
+            npm_config_runtime=electron \
+            npm_config_target=$ELECTRON_VERSION \
+            npm_config_arch=$TARGET_ARCH \
+            npm_config_disturl=https://electronjs.org/headers \
+            npm rebuild deepspeech --loglevel verbose
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          BINDING_ROOT=node_modules/deepspeech/lib/binding/v0.9.3
+          if [ ! -d "$BINDING_ROOT" ]; then echo "Binding root not found: $BINDING_ROOT"; ls -la node_modules/deepspeech || true; exit 1; fi
+          tar czf deepspeech-linux-x64.tgz -C node_modules/deepspeech/lib/binding v0.9.3
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepspeech-linux-x64
+          path: deepspeech-linux-x64.tgz
+
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-latest
+    env:
+      ELECTRON_VERSION: '35.5.1'
+      TARGET_ARCH: x64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm ci
+      - name: Rebuild deepspeech native binding (Windows x64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ELECTRON_VERSION=$ELECTRON_VERSION"
+          echo "TARGET_ARCH=$TARGET_ARCH"
+          npm_config_build_from_source=true \
+            npm_config_runtime=electron \
+            npm_config_target=$ELECTRON_VERSION \
+            npm_config_arch=$TARGET_ARCH \
+            npm_config_disturl=https://electronjs.org/headers \
+            npm rebuild deepspeech --loglevel verbose
+      - name: Package artifact (zip)
+        run: |
+          powershell -NoProfile -Command "\
+            $bindingRoot = 'node_modules\\deepspeech\\lib\\binding\\v0.9.3'; \
+            if (-not (Test-Path $bindingRoot)) { Write-Error 'Binding root not found'; exit 1 }; \
+            Compress-Archive -Path $bindingRoot -DestinationPath deepspeech-windows-x64.zip -Force"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepspeech-windows-x64
+          path: deepspeech-windows-x64.zip
+
+  build-macos:
+    name: Build macOS (arm64 recommended)
+    # Use macos-14 hosted runner if available; for guaranteed arm64 you may use a self-hosted apple-silicon runner labeled 'macos-arm64'
+    runs-on: macos-14
+    env:
+      ELECTRON_VERSION: '35.5.1'
+      TARGET_ARCH: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm ci
+      - name: Rebuild deepspeech native binding (macOS)
+        run: |
+          set -euo pipefail
+          echo "ELECTRON_VERSION=$ELECTRON_VERSION"
+          echo "TARGET_ARCH=$TARGET_ARCH"
+          npm_config_build_from_source=true \
+            npm_config_runtime=electron \
+            npm_config_target=$ELECTRON_VERSION \
+            npm_config_arch=$TARGET_ARCH \
+            npm_config_disturl=https://electronjs.org/headers \
+            npm rebuild deepspeech --loglevel verbose
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          BINDING_ROOT=node_modules/deepspeech/lib/binding/v0.9.3
+          if [ ! -d "$BINDING_ROOT" ]; then echo "Binding root not found: $BINDING_ROOT"; ls -la node_modules/deepspeech || true; exit 1; fi
+          tar czf deepspeech-macos-arm64.tgz -C node_modules/deepspeech/lib/binding v0.9.3
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepspeech-macos-arm64
+          path: deepspeech-macos-arm64.tgz
+
+# Notes:
+# - Trigger this workflow from the Actions UI (Run workflow) or via repository_dispatch.
+# - After a successful run, download the artifact from the workflow run page (Actions > Build DeepSpeech > <run> > Artifacts).
+# - Extract the artifact into node_modules/deepspeech/lib/binding/v0.9.3 on the target machine so the native addon path matches.
