@@ -30,8 +30,8 @@ jobs:
             npm_config_arch=$TARGET_ARCH \
             npm_config_disturl=https://electronjs.org/headers \
             npm rebuild deepspeech --loglevel verbose
-          # Ensure electron-rebuild produces the correct node-abi folder (node-v137 for Electron v35)
-          npx electron-rebuild -f -w deepspeech --version $ELECTRON_VERSION || true
+          # Ensure rebuild runs with @electron/rebuild targeting the desired Electron version
+          npx @electron/rebuild -f -w deepspeech --electron-version $ELECTRON_VERSION --arch $TARGET_ARCH || true
       - name: Package artifact
         run: |
           set -euo pipefail
@@ -80,7 +80,7 @@ jobs:
             npm_config_arch=$TARGET_ARCH \
             npm_config_disturl=https://electronjs.org/headers \
             npm rebuild deepspeech --loglevel verbose
-          npx electron-rebuild -f -w deepspeech --version $ELECTRON_VERSION || true
+          npx @electron/rebuild -f -w deepspeech --electron-version $ELECTRON_VERSION --arch $TARGET_ARCH || true
       - name: Package artifact (zip)
         shell: powershell
         run: |
@@ -130,7 +130,7 @@ jobs:
             npm_config_arch=$TARGET_ARCH \
             npm_config_disturl=https://electronjs.org/headers \
             npm rebuild deepspeech --loglevel verbose
-          npx electron-rebuild -f -w deepspeech --version $ELECTRON_VERSION || true
+          npx @electron/rebuild -f -w deepspeech --electron-version $ELECTRON_VERSION --arch $TARGET_ARCH || true
       - name: Package artifact
         run: |
           set -euo pipefail
