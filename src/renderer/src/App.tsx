@@ -1,38 +1,31 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import ControlPanel from "../components/ControlPanel";
 import SettingsPage from "../components/SettingsPage";
+import SplashScreen from "../components/SplashScreen";
 
-type ActiveScreen = "dashboard" | "settings";
+type ActiveScreen = "splash" | "dashboard" | "settings";
 
 export default function App(): JSX.Element {
-  const [activeScreen, setActiveScreen] = useState<ActiveScreen>("dashboard");
+  const [activeScreen, setActiveScreen] = useState<ActiveScreen>("splash");
 
-  // Auto-open settings on first run when integrations are missing
-  useEffect(() => {
-    const checkIntegrations = async (): Promise<void> => {
-      try {
-        if (!window.electron?.getIntegrationStatus) return;
-        const status = await window.electron.getIntegrationStatus();
-        if (!status) return;
-        if (!status.hasDeepSpeechModel || !status.hasAwsCreds) {
-          setActiveScreen("settings");
-        }
-      } catch {
-        // ignore
-      }
-    };
-
-    void checkIntegrations();
-  }, []);
+  if (activeScreen === "splash") {
+    return <SplashScreen onComplete={() => setActiveScreen("dashboard")} />;
+  }
 
   if (activeScreen === "settings") {
     return (
-      <SettingsPage
-        onClose={() => setActiveScreen("dashboard")}
-        onOpenStudio={() => setActiveScreen("dashboard")}
-      />
+      <div className="bg-[#0e0e11] min-h-screen w-full">
+        <SettingsPage
+          onClose={() => setActiveScreen("dashboard")}
+          onOpenStudio={() => setActiveScreen("dashboard")}
+        />
+      </div>
     );
   }
 
-  return <ControlPanel onOpenSettings={() => setActiveScreen("settings")} />;
+  return (
+    <div className="bg-[#0e0e11] min-h-screen w-full">
+      <ControlPanel onOpenSettings={() => setActiveScreen("settings")} />
+    </div>
+  );
 }

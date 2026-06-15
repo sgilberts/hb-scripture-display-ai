@@ -41,6 +41,7 @@ interface SettingsSnapshot {
   displayFormat: DisplayFormat;
   activeTheme: ThemeType;
   isAutoDisplayMode: boolean;
+  isScriptureParaphraseMode: boolean;
   selectedAudioDeviceId: string;
   inputGain: number;
   defaultOutputResolution: string;
@@ -58,6 +59,7 @@ interface SettingsSnapshot {
   backgroundStyle: BackgroundStyle;
   backgroundTexture: BackgroundTexture;
   backgroundImagePath: string;
+  outputRoutingMap?: Record<string, string | number>;
   backgroundPositionX: number;
   backgroundPositionY: number;
   textPositionX: number;
@@ -65,7 +67,6 @@ interface SettingsSnapshot {
 }
 
 interface IntegrationStatus {
-  hasDeepSpeechModel: boolean;
   hasAwsCreds: boolean;
   awsRegion?: string | null;
   pollyVoiceId?: string | null;
@@ -91,6 +92,7 @@ const DEFAULT_SETTINGS: SettingsSnapshot = {
   displayFormat: "FULL",
   activeTheme: "IMAGE",
   isAutoDisplayMode: false,
+  isScriptureParaphraseMode: false,
   selectedAudioDeviceId: "default",
   inputGain: 100,
   defaultOutputResolution: "1920x1080 (16:9)",
@@ -112,6 +114,7 @@ const DEFAULT_SETTINGS: SettingsSnapshot = {
   backgroundPositionY: 50,
   textPositionX: 50,
   textPositionY: 50,
+  outputRoutingMap: {},
 };
 
 const SECTIONS: Array<{
@@ -121,27 +124,27 @@ const SECTIONS: Array<{
   icon: string;
   group: "display" | "signals" | "system";
 }> = [
-  { id: "general", label: "General Display", navLabel: "General Display", icon: "monitor", group: "display" },
-  { id: "bible", label: "Bible & Version Ingestion", navLabel: "Bible & Ingestion", icon: "auto_stories", group: "display" },
-  { id: "mapping", label: "Screen Mapping", navLabel: "Screen Mapping", icon: "grid_4x4", group: "display" },
-  { id: "routing", label: "Output Routing", navLabel: "Output Routing", icon: "call_split", group: "signals" },
-  { id: "ndi", label: "NDI Pipeline Settings", navLabel: "NDI Pipeline", icon: "share", group: "signals" },
-  { id: "matrix", label: "Output Destination Matrix", navLabel: "Output Destination Matrix", icon: "table_view", group: "signals" },
-  { id: "audio", label: "Audio Input Channels", navLabel: "Audio Input Channels", icon: "graphic_eq", group: "signals" },
-  { id: "patching", label: "Patching", navLabel: "Patching", icon: "settings_input_component", group: "signals" },
-  { id: "video", label: "Video Input", navLabel: "Video Input", icon: "videocam", group: "signals" },
-  { id: "integrations", label: "Integrations", navLabel: "Integrations", icon: "hub", group: "system" },
-  { id: "about", label: "About Us", navLabel: "System Info", icon: "info", group: "system" },
-];
+    { id: "general", label: "General Display", navLabel: "General Display", icon: "monitor", group: "display" },
+    { id: "bible", label: "Bible & Version Ingestion", navLabel: "Bible & Ingestion", icon: "auto_stories", group: "display" },
+    { id: "mapping", label: "Screen Mapping", navLabel: "Screen Mapping", icon: "grid_4x4", group: "display" },
+    { id: "routing", label: "Output Routing", navLabel: "Output Routing", icon: "call_split", group: "signals" },
+    { id: "ndi", label: "NDI Pipeline Settings", navLabel: "NDI Pipeline", icon: "share", group: "signals" },
+    { id: "matrix", label: "Output Destination Matrix", navLabel: "Output Destination Matrix", icon: "table_view", group: "signals" },
+    { id: "audio", label: "Audio Input Channels", navLabel: "Audio Input Channels", icon: "graphic_eq", group: "signals" },
+    { id: "patching", label: "Patching", navLabel: "Patching", icon: "settings_input_component", group: "signals" },
+    { id: "video", label: "Video Input", navLabel: "Video Input", icon: "videocam", group: "signals" },
+    { id: "integrations", label: "Integrations", navLabel: "Integrations", icon: "hub", group: "system" },
+    { id: "about", label: "About Us", navLabel: "System Info", icon: "info", group: "system" },
+  ];
 
 const NAV_GROUPS: Array<{
   id: "display" | "signals" | "system";
   label: string;
 }> = [
-  { id: "display", label: "Display Control" },
-  { id: "signals", label: "Signal Routing" },
-  { id: "system", label: "System" },
-];
+    { id: "display", label: "Display Control" },
+    { id: "signals", label: "Signal Routing" },
+    { id: "system", label: "System" },
+  ];
 
 const FONT_OPTIONS = [
   ["Inter", "Inter, system-ui, sans-serif"],
@@ -225,6 +228,10 @@ function coerceSettings(raw: Record<string, unknown> | null | undefined): Settin
       typeof raw?.isAutoDisplayMode === "boolean"
         ? raw.isAutoDisplayMode
         : DEFAULT_SETTINGS.isAutoDisplayMode,
+    isScriptureParaphraseMode:
+      typeof raw?.isScriptureParaphraseMode === "boolean"
+        ? raw.isScriptureParaphraseMode
+        : DEFAULT_SETTINGS.isScriptureParaphraseMode,
     selectedAudioDeviceId:
       typeof raw?.selectedAudioDeviceId === "string" && raw.selectedAudioDeviceId.trim()
         ? raw.selectedAudioDeviceId
@@ -254,6 +261,10 @@ function coerceSettings(raw: Record<string, unknown> | null | undefined): Settin
       typeof raw?.stripMetadataOnImport === "boolean"
         ? raw.stripMetadataOnImport
         : DEFAULT_SETTINGS.stripMetadataOnImport,
+    outputRoutingMap:
+      typeof raw?.outputRoutingMap === "object" && raw?.outputRoutingMap !== null
+        ? raw.outputRoutingMap
+        : DEFAULT_SETTINGS.outputRoutingMap,
   } as SettingsSnapshot;
 }
 
@@ -645,17 +656,21 @@ function Toggle({
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={checked}
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={cx(
-        "relative h-5 w-9 rounded-full border transition-colors",
-        checked ? "border-[#4edea3] bg-[#10b981]/70" : "border-[#3c4a42] bg-[#353438]",
+        "relative inline-flex h-[24px] w-[44px] shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        checked ? "bg-[#10b981]" : "bg-surface-container-highest"
       )}
     >
+      <span className="sr-only">Toggle {label}</span>
       <span
+        aria-hidden="true"
         className={cx(
-          "absolute top-0.5 h-3.5 w-3.5 rounded-full bg-[#e4e1e6] transition-transform",
-          checked ? "translate-x-[18px]" : "translate-x-0.5",
+          "pointer-events-none absolute left-0 inline-block h-[20px] w-[20px] transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+          checked ? "translate-x-[20px]" : "translate-x-0"
         )}
       />
     </button>
@@ -912,9 +927,8 @@ function AudioChannelStrip({
 }
 
 function ProcessingEqGraph({ eq }: { eq: Record<EqBand, number> }) {
-  const path = `M0 ${78 - eq.low * 2.5} Q 50 ${78 - eq.low * 4},80 ${42 - eq.low * 2} T150 ${
-    22 - eq.mid * 1.8
-  } T250 ${50 - eq.high} T350 ${70 - eq.high * 2} T400 ${70 - eq.high * 2}`;
+  const path = `M0 ${78 - eq.low * 2.5} Q 50 ${78 - eq.low * 4},80 ${42 - eq.low * 2} T150 ${22 - eq.mid * 1.8
+    } T250 ${50 - eq.high} T350 ${70 - eq.high * 2} T400 ${70 - eq.high * 2}`;
 
   return (
     <div className="relative h-32 overflow-hidden rounded-sm border border-[#3c4a42] bg-[#0e0e11] bg-[linear-gradient(#1b1b1e_1px,transparent_1px),linear-gradient(90deg,#1b1b1e_1px,transparent_1px)] bg-[length:20px_20px]">
@@ -1405,18 +1419,18 @@ function useLiveAudio(
           audio:
             deviceId && deviceId !== "default"
               ? {
-                  deviceId: { exact: deviceId },
-                  echoCancellation: false,
-                  noiseSuppression: false,
-                  autoGainControl: false,
-                  sampleRate: 48000,
-                }
+                deviceId: { exact: deviceId },
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+                sampleRate: 48000,
+              }
               : {
-                  echoCancellation: false,
-                  noiseSuppression: false,
-                  autoGainControl: false,
-                  sampleRate: 48000,
-                },
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+                sampleRate: 48000,
+              },
         });
 
         if (cancelled) return;
@@ -1470,7 +1484,7 @@ function useLiveAudio(
           const nextDb = Math.max(-60, 20 * Math.log10(rms || 0.000001));
           setDb(Math.round(nextDb * 10) / 10);
           setLevel(Math.min(100, Math.max(0, (nextDb + 60) * 1.8)));
-          frame = window.requestAnimationFrame(tick);
+          frame = window.setTimeout(tick, 66) as unknown as number;
         };
 
         setError("");
@@ -1484,7 +1498,7 @@ function useLiveAudio(
 
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(frame);
+      window.clearTimeout(frame);
       stream?.getTracks().forEach((track) => track.stop());
       void context?.close();
     };
@@ -1526,15 +1540,13 @@ export default function SettingsPage({ onClose, onOpenStudio }: SettingsPageProp
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
   const [eq, setEq] = useState<Record<EqBand, number>>({ low: 0, mid: 0, high: 0 });
-  const [deepspeechModelPath, setDeepspeechModelPath] = useState("");
-  const [deepspeechScorerPath, setDeepspeechScorerPath] = useState("");
   const [awsAccessKey, setAwsAccessKey] = useState("");
   const [awsSecretKey, setAwsSecretKey] = useState("");
-  const [hasDeepSpeechModel, setHasDeepSpeechModel] = useState(false);
   const [hasAwsCreds, setHasAwsCreds] = useState(false);
   const [awsRegion, setAwsRegion] = useState("us-east-1");
   const [pollyVoice, setPollyVoice] = useState("Joanna");
   const [bibleDbPath, setBibleDbPath] = useState("");
+  const [selectedConfigOutputId, setSelectedConfigOutputId] = useState<string | undefined>(undefined);
   const audio = useLiveAudio(active === "audio", settings.selectedAudioDeviceId, settings.inputGain, eq);
 
   useEffect(() => {
@@ -1575,10 +1587,10 @@ export default function SettingsPage({ onClose, onOpenStudio }: SettingsPageProp
 
   const videoRows = videoDevices.length
     ? videoDevices.map((device, index) => [
-        device.label || `Camera ${index + 1}`,
-        "MediaDevice",
-        index === 0 ? "LIVE" : "READY",
-      ])
+      device.label || `Camera ${index + 1}`,
+      "MediaDevice",
+      index === 0 ? "LIVE" : "READY",
+    ])
     : [["No camera permission", "Browser media devices", "IDLE"]];
 
   const activeMeta = SECTIONS.find((section) => section.id === active) ?? SECTIONS[0];
@@ -1599,6 +1611,7 @@ export default function SettingsPage({ onClose, onOpenStudio }: SettingsPageProp
       if (typeof patch.outputFontSize === "number") setOutputFontSize(next.outputFontSize);
       if (patch.lowerThirdStyle) setLowerThirdStyle(next.lowerThirdStyle);
       patchState({
+        isScriptureParaphraseMode: next.isScriptureParaphraseMode,
         scriptureLowerThirdStyle: next.scriptureLowerThirdStyle,
         lyricsLowerThirdStyle: next.lyricsLowerThirdStyle,
         backgroundStyle: next.backgroundStyle,
@@ -1608,6 +1621,7 @@ export default function SettingsPage({ onClose, onOpenStudio }: SettingsPageProp
         backgroundPositionY: next.backgroundPositionY,
         textPositionX: next.textPositionX,
         textPositionY: next.textPositionY,
+        outputRoutingMap: next.outputRoutingMap,
       });
 
       return next;
@@ -1653,18 +1667,13 @@ export default function SettingsPage({ onClose, onOpenStudio }: SettingsPageProp
 
         const integration = await extendedElectron().getIntegrationStatus?.();
         if (integration) {
-          setHasDeepSpeechModel(Boolean((integration as any).hasDeepSpeechModel));
           setHasAwsCreds(Boolean(integration.hasAwsCreds));
           setAwsRegion(integration.awsRegion ?? "us-east-1");
           setPollyVoice(integration.pollyVoiceId ?? "Joanna");
-          setDeepspeechModelPath((integration as any).deepspeechModelPath ?? "");
-          setDeepspeechScorerPath((integration as any).deepspeechScorerPath ?? "");
           setBibleDbPath(integration.bibleDatabasePath ?? "");
         }
 
-        if (integration && (!integration.hasDeepSpeechModel || !integration.hasAwsCreds)) {
-          setActive("integrations");
-        }
+
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "Unable to load settings.");
       } finally {
@@ -1717,8 +1726,6 @@ export default function SettingsPage({ onClose, onOpenStudio }: SettingsPageProp
     setSaving(true);
     try {
       await extendedElectron().saveIntegrationSettings?.({
-        deepspeechModelPath: deepspeechModelPath || undefined,
-        deepspeechScorerPath: deepspeechScorerPath || undefined,
         awsAccessKeyId: awsAccessKey || undefined,
         awsSecretAccessKey: awsSecretKey || undefined,
         awsRegion,
@@ -1727,11 +1734,8 @@ export default function SettingsPage({ onClose, onOpenStudio }: SettingsPageProp
       });
       const integration = await extendedElectron().getIntegrationStatus?.();
       if (integration) {
-        setHasDeepSpeechModel(Boolean((integration as any).hasDeepSpeechModel));
         setHasAwsCreds(Boolean(integration.hasAwsCreds));
       }
-      setDeepspeechModelPath("");
-      setDeepspeechScorerPath("");
       setAwsAccessKey("");
       setAwsSecretKey("");
       setStatus("Integration settings saved.");
@@ -1756,7 +1760,7 @@ export default function SettingsPage({ onClose, onOpenStudio }: SettingsPageProp
           <div className="min-w-0">
             <div className="truncate text-[16px] font-bold tracking-tight">HallelujahBeamer</div>
             <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#bbcabf]">
-              V3.1.0-EMERALD
+              v1.0.0-EMERALD
             </div>
           </div>
         </div>
@@ -1769,7 +1773,7 @@ export default function SettingsPage({ onClose, onOpenStudio }: SettingsPageProp
             <div className="min-w-0">
               <div className="truncate text-[13px] font-medium leading-tight">Main Operator</div>
               <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#89968d]">
-                v2.1.4-STABLE
+                User Logged in Name
               </div>
             </div>
           </div>
@@ -1880,416 +1884,516 @@ export default function SettingsPage({ onClose, onOpenStudio }: SettingsPageProp
         ) : (
           <div className="flex-1 overflow-y-auto p-3">
             <div className="grid h-full min-h-[680px] grid-cols-12 gap-2">
-            {active === "general" && (
-              <>
-                <Panel title="Display Control" icon="monitor" className="col-span-7">
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Display Format">
-                      <Segmented
-                        value={settings.displayFormat}
-                        options={DISPLAY_FORMATS}
-                        onChange={(displayFormat) => updateSettings({ displayFormat })}
-                      />
-                    </Field>
-                    <Field label="Theme">
-                      <Segmented
-                        value={settings.activeTheme}
-                        options={THEMES}
-                        onChange={(activeTheme) => updateSettings({ activeTheme })}
-                      />
-                    </Field>
-                    <Field label="Resolution">
-                      <Select
-                        value={settings.defaultOutputResolution}
-                        onChange={(defaultOutputResolution) => updateSettings({ defaultOutputResolution })}
-                      >
-                        {RESOLUTIONS.map((resolution) => (
-                          <option key={resolution}>{resolution}</option>
-                        ))}
-                      </Select>
-                    </Field>
-                    <Field label="Font">
-                      <Select
-                        value={settings.outputFontFamily}
-                        onChange={(outputFontFamily) => updateSettings({ outputFontFamily })}
-                      >
-                        {FONT_OPTIONS.map(([label, value]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </Select>
-                    </Field>
-                    <Field label={`Font Size ${settings.outputFontSize}`}>
-                      <input
-                        type="range"
-                        min={60}
-                        max={160}
-                        value={settings.outputFontSize}
-                        onChange={(event) => updateSettings({ outputFontSize: Number(event.target.value) })}
-                        className="w-full accent-[#4edea3]"
-                      />
-                    </Field>
-                    <Field label={`Opacity ${settings.outputOpacity}%`}>
-                      <input
-                        type="range"
-                        min={0}
-                        max={100}
-                        value={settings.outputOpacity}
-                        onChange={(event) => updateSettings({ outputOpacity: Number(event.target.value) })}
-                        className="w-full accent-[#ffb95f]"
-                      />
-                    </Field>
-                  </div>
-                </Panel>
-                <Panel title="Background Studio" icon="wallpaper" className="col-span-5">
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Style">
-                      <Select
-                        value={settings.backgroundStyle}
-                        onChange={(backgroundStyle) =>
-                          updateSettings({ backgroundStyle: backgroundStyle as BackgroundStyle })
-                        }
-                      >
-                        {BACKGROUNDS.map(([label, value]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </Select>
-                    </Field>
-                    <Field label="Texture">
-                      <Select
-                        value={settings.backgroundTexture}
-                        onChange={(backgroundTexture) =>
-                          updateSettings({ backgroundTexture: backgroundTexture as BackgroundTexture })
-                        }
-                      >
-                        {TEXTURES.map(([label, value]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </Select>
-                    </Field>
-                    {[
-                      ["BG X", "backgroundPositionX"],
-                      ["BG Y", "backgroundPositionY"],
-                      ["Text X", "textPositionX"],
-                      ["Text Y", "textPositionY"],
-                    ].map(([label, key]) => (
-                      <Field key={key} label={`${label} ${settings[key as keyof SettingsSnapshot]}`}>
+              {active === "general" && (
+                <>
+                  <Panel title="Display Control" icon="monitor" className="col-span-7">
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="Display Format">
+                        <Segmented
+                          value={settings.displayFormat}
+                          options={DISPLAY_FORMATS}
+                          onChange={(displayFormat) => updateSettings({ displayFormat })}
+                        />
+                      </Field>
+                      <Field label="Theme">
+                        <Segmented
+                          value={settings.activeTheme}
+                          options={THEMES}
+                          onChange={(activeTheme) => updateSettings({ activeTheme })}
+                        />
+                      </Field>
+                      <Field label="Resolution">
+                        <Select
+                          value={settings.defaultOutputResolution}
+                          onChange={(defaultOutputResolution) => updateSettings({ defaultOutputResolution })}
+                        >
+                          {RESOLUTIONS.map((resolution) => (
+                            <option key={resolution}>{resolution}</option>
+                          ))}
+                        </Select>
+                      </Field>
+                      <Field label="Font">
+                        <Select
+                          value={settings.outputFontFamily}
+                          onChange={(outputFontFamily) => updateSettings({ outputFontFamily })}
+                        >
+                          {FONT_OPTIONS.map(([label, value]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                      <Field label={`Font Size ${settings.outputFontSize}`}>
+                        <input
+                          type="range"
+                          min={60}
+                          max={160}
+                          value={settings.outputFontSize}
+                          onChange={(event) => updateSettings({ outputFontSize: Number(event.target.value) })}
+                          className="w-full accent-[#4edea3]"
+                        />
+                      </Field>
+                      <Field label={`Opacity ${settings.outputOpacity}%`}>
                         <input
                           type="range"
                           min={0}
                           max={100}
-                          value={Number(settings[key as keyof SettingsSnapshot])}
-                          onChange={(event) =>
-                            updateSettings({ [key]: Number(event.target.value) } as Partial<SettingsSnapshot>)
-                          }
-                          className="w-full accent-[#4edea3]"
+                          value={settings.outputOpacity}
+                          onChange={(event) => updateSettings({ outputOpacity: Number(event.target.value) })}
+                          className="w-full accent-[#ffb95f]"
                         />
                       </Field>
-                    ))}
-                  </div>
-                </Panel>
-                <Panel title="Output Guards" icon="shield" className="col-span-12">
-                  <div className="grid grid-cols-4 gap-2">
-                    {[
-                      ["Auto Display", settings.isAutoDisplayMode, "isAutoDisplayMode"],
-                      ["Alpha Channel", settings.enableAlphaChannel, "enableAlphaChannel"],
-                      ["Mirror Output", settings.enableScreenMirrorOutput, "enableScreenMirrorOutput"],
-                      ["Aspect Lock", settings.forceAspectRatio, "forceAspectRatio"],
-                    ].map(([label, checked, key]) => (
-                      <div key={String(key)} className="flex items-center justify-between border border-[#3c4a42] bg-[#131316] px-3 py-2">
-                        <span className="font-mono text-[10px] uppercase tracking-[0.14em]">{label}</span>
-                        <Toggle
-                          checked={Boolean(checked)}
-                          label={String(label)}
-                          onChange={(value) => updateSettings({ [key as string]: value } as Partial<SettingsSnapshot>)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </Panel>
-              </>
-            )}
-
-            {active === "bible" && (
-              <>
-                <Panel title="Active Translations Repository" icon="database" className="col-span-8">
-                  <table className="w-full table-fixed text-left font-mono text-[11px]">
-                    <thead className="text-[#86948a]">
-                      <tr className="border-b border-[#3c4a42]">
-                        <th className="w-16 py-2">DEF</th>
-                        <th className="w-24 py-2">CODE</th>
-                        <th className="py-2">NAME</th>
-                        <th className="w-28 py-2 text-right">ACTION</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {translations.map((translation) => (
-                        <tr key={translation} className="border-b border-[#3c4a42]">
-                          <td className="py-2">
-                            <button
-                              type="button"
-                              onClick={() => updateSettings({ currentBibleTranslation: translation })}
-                              className="flex h-4 w-4 items-center justify-center rounded-full border border-[#4edea3]"
-                            >
-                              {translation === settings.currentBibleTranslation && <Dot />}
-                            </button>
-                          </td>
-                          <td className="py-2 text-[#4edea3]">{translation}</td>
-                          <td className="truncate py-2">Installed Translation {translation}</td>
-                          <td className="py-2 text-right">
-                            <button
-                              type="button"
-                              onClick={() => void deleteTranslation(translation)}
-                              className="text-[#ffb4ab]"
-                            >
-                              DELETE
-                            </button>
-                          </td>
-                        </tr>
+                    </div>
+                  </Panel>
+                  <Panel title="Background Studio" icon="wallpaper" className="col-span-5">
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="Style">
+                        <Select
+                          value={settings.backgroundStyle}
+                          onChange={(backgroundStyle) =>
+                            updateSettings({ backgroundStyle: backgroundStyle as BackgroundStyle })
+                          }
+                        >
+                          {BACKGROUNDS.map(([label, value]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                      <Field label="Texture">
+                        <Select
+                          value={settings.backgroundTexture}
+                          onChange={(backgroundTexture) =>
+                            updateSettings({ backgroundTexture: backgroundTexture as BackgroundTexture })
+                          }
+                        >
+                          {TEXTURES.map(([label, value]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                      {[
+                        ["BG X", "backgroundPositionX"],
+                        ["BG Y", "backgroundPositionY"],
+                        ["Text X", "textPositionX"],
+                        ["Text Y", "textPositionY"],
+                      ].map(([label, key]) => (
+                        <Field key={key} label={`${label} ${settings[key as keyof SettingsSnapshot]}`}>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={Number(settings[key as keyof SettingsSnapshot])}
+                            onChange={(event) =>
+                              updateSettings({ [key]: Number(event.target.value) } as Partial<SettingsSnapshot>)
+                            }
+                            className="w-full accent-[#4edea3]"
+                          />
+                        </Field>
                       ))}
-                    </tbody>
-                  </table>
-                </Panel>
-                <Panel title="Universal Format File Ingestor" icon="upload_file" className="col-span-4">
-                  <button
-                    type="button"
-                    onClick={() => void importBible()}
-                    className="flex h-36 w-full flex-col items-center justify-center border border-dashed border-[#3c4a42] bg-[#131316] font-mono text-[11px] uppercase tracking-[0.2em] text-[#4edea3]"
-                  >
-                    <Icon name="upload" className="mb-3 text-[24px]" />
-                    Upload File
-                  </button>
-                  <div className="mt-3 grid grid-cols-3 gap-1 font-mono text-[9px] text-[#bbcabf]">
-                    {[".xml", ".sqlite", ".usfm", ".json", ".txt", ".csv"].map((ext) => (
-                      <span key={ext} className="border border-[#3c4a42] bg-[#131316] px-2 py-1 text-center">
-                        {ext}
-                      </span>
-                    ))}
-                  </div>
-                </Panel>
-                <Panel title="Parser Normalization" icon="tune" className="col-span-12">
-                  <div className="grid grid-cols-3 gap-2">
-                    <ToggleRow
-                      label="Auto-correct encoding anomalies"
-                      checked={settings.autoCorrectEncoding}
-                      onChange={(autoCorrectEncoding) => updateSettings({ autoCorrectEncoding })}
-                    />
-                    <ToggleRow
-                      label="Strip non-biblical metadata"
-                      checked={settings.stripMetadataOnImport}
-                      onChange={(stripMetadataOnImport) => updateSettings({ stripMetadataOnImport })}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void chooseBibleDb()}
-                      className="border border-[#3c4a42] bg-[#131316] px-3 py-2 text-left font-mono text-[10px] uppercase tracking-[0.14em]"
-                    >
-                      DB: {bibleDbPath ? "LINKED" : "CHOOSE"}
-                    </button>
-                  </div>
-                </Panel>
-              </>
-            )}
+                    </div>
+                  </Panel>
+                  <Panel title="Output Guards" icon="shield" className="col-span-12">
+                    <div className="grid grid-cols-4 gap-2">
+                      {[
+                        ["Auto Display", settings.isAutoDisplayMode, "isAutoDisplayMode"],
+                        ["Paraphrase", settings.isScriptureParaphraseMode, "isScriptureParaphraseMode"],
+                        ["Alpha Channel", settings.enableAlphaChannel, "enableAlphaChannel"],
+                        ["Mirror Output", settings.enableScreenMirrorOutput, "enableScreenMirrorOutput"],
+                        ["Aspect Lock", settings.forceAspectRatio, "forceAspectRatio"],
+                      ].map(([label, checked, key]) => (
+                        <div key={String(key)} className="flex items-center justify-between border border-[#3c4a42] bg-[#131316] px-3 py-2">
+                          <span className="font-mono text-[10px] uppercase tracking-[0.14em]">{label}</span>
+                          <Toggle
+                            checked={Boolean(checked)}
+                            label={String(label)}
+                            onChange={(value) => updateSettings({ [key as string]: value } as Partial<SettingsSnapshot>)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </Panel>
+                </>
+              )}
 
-            {active === "routing" && (
-              <>
-                <Panel title="Output Settings" icon="display_settings" className="col-span-5">
-                  <div className="grid gap-3">
-                    <Field label="Lower Third Style">
-                      <Segmented
-                        value={settings.lowerThirdStyle}
-                        options={LOWER_THIRDS}
-                        onChange={(lowerThirdStyle) =>
-                          updateSettings({
-                            lowerThirdStyle,
-                            scriptureLowerThirdStyle: lowerThirdStyle,
-                          })
-                        }
-                      />
-                    </Field>
-                    <Field label="Resolution">
-                      <Select
-                        value={settings.defaultOutputResolution}
-                        onChange={(defaultOutputResolution) => updateSettings({ defaultOutputResolution })}
-                      >
-                        {RESOLUTIONS.map((resolution) => (
-                          <option key={resolution}>{resolution}</option>
+              {active === "bible" && (
+                <>
+                  <Panel title="Active Translations Repository" icon="database" className="col-span-8">
+                    <table className="w-full table-fixed text-left font-mono text-[11px]">
+                      <thead className="text-[#86948a]">
+                        <tr className="border-b border-[#3c4a42]">
+                          <th className="w-16 py-2">DEF</th>
+                          <th className="w-24 py-2">CODE</th>
+                          <th className="py-2">NAME</th>
+                          <th className="w-28 py-2 text-right">ACTION</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {translations.map((translation) => (
+                          <tr key={translation} className="border-b border-[#3c4a42]">
+                            <td className="py-2">
+                              <button
+                                type="button"
+                                onClick={() => updateSettings({ currentBibleTranslation: translation })}
+                                className="flex h-4 w-4 items-center justify-center rounded-full border border-[#4edea3]"
+                              >
+                                {translation === settings.currentBibleTranslation && <Dot />}
+                              </button>
+                            </td>
+                            <td className="py-2 text-[#4edea3]">{translation}</td>
+                            <td className="truncate py-2">Installed Translation {translation}</td>
+                            <td className="py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={() => void deleteTranslation(translation)}
+                                className="text-[#ffb4ab]"
+                              >
+                                DELETE
+                              </button>
+                            </td>
+                          </tr>
                         ))}
-                      </Select>
-                    </Field>
-                    <ToggleRow
-                      label="Alpha channel"
-                      checked={settings.enableAlphaChannel}
-                      onChange={(enableAlphaChannel) => updateSettings({ enableAlphaChannel })}
-                    />
-                    <ToggleRow
-                      label="Screen mirror"
-                      checked={settings.enableScreenMirrorOutput}
-                      onChange={(enableScreenMirrorOutput) => updateSettings({ enableScreenMirrorOutput })}
-                    />
-                  </div>
-                </Panel>
-                <Panel title="Output Routing" icon="hub" className="col-span-7">
-                  <OutputGrid outputs={selectedOutputs} onToggle={toggleOutput} />
-                </Panel>
-              </>
-            )}
-
-            {active === "mapping" && <ScreenMapping outputs={selectedOutputs} />}
-            {active === "ndi" && <NdiPipeline outputs={selectedOutputs} />}
-            {active === "matrix" && <OutputMatrix outputs={selectedOutputs} onToggle={toggleOutput} settings={settings} updateSettings={updateSettings} />}
-
-            {active === "patching" && <PatchMatrix outputs={selectedOutputs} onToggle={toggleOutput} />}
-
-            {active === "video" && (
-              <>
-                <Panel title="Input Discovery Matrix" icon="videocam" className="col-span-4">
-                  <table className="w-full text-left font-mono text-[11px]">
-                    <tbody>
-                      {videoRows.map(([name, source, signal]) => (
-                        <tr key={name} className="border-b border-[#3c4a42]">
-                          <td className="py-2">
-                            <div className="text-[#4edea3]">{name}</div>
-                            <div className="text-[9px] uppercase tracking-[0.14em] text-[#86948a]">{source}</div>
-                          </td>
-                          <td className="py-2 text-right">{signal}</td>
-                        </tr>
+                      </tbody>
+                    </table>
+                  </Panel>
+                  <Panel title="Universal Format File Ingestor" icon="upload_file" className="col-span-4">
+                    <button
+                      type="button"
+                      onClick={() => void importBible()}
+                      className="flex h-36 w-full flex-col items-center justify-center border border-dashed border-[#3c4a42] bg-[#131316] font-mono text-[11px] uppercase tracking-[0.2em] text-[#4edea3]"
+                    >
+                      <Icon name="upload" className="mb-3 text-[24px]" />
+                      Upload File
+                    </button>
+                    <div className="mt-3 grid grid-cols-3 gap-1 font-mono text-[9px] text-[#bbcabf]">
+                      {[".xml", ".sqlite", ".usfm", ".json", ".txt", ".csv"].map((ext) => (
+                        <span key={ext} className="border border-[#3c4a42] bg-[#131316] px-2 py-1 text-center">
+                          {ext}
+                        </span>
                       ))}
-                    </tbody>
-                  </table>
-                </Panel>
-                <Panel title="Preview / Luma" icon="center_focus_strong" className="col-span-5">
-                  <div className="flex h-64 items-center justify-center border border-[#3c4a42] bg-[#050506]">
-                    <div className="text-center font-mono">
-                      <Icon name="videocam" className="mb-2 text-[36px] text-[#4edea3]" />
-                      <div className="text-[12px] uppercase tracking-[0.2em]">Media Device Preview</div>
-                      <div className="mt-1 text-[10px] text-[#86948a]">{videoRows[0]?.[0]}</div>
                     </div>
-                  </div>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    <Bar value={68} />
-                    <Bar value={48} tone="amber" />
-                    <Bar value={28} />
-                  </div>
-                </Panel>
-                <Panel title="Patch & Route" icon="output" className="col-span-3">
-                  {["PGM Bus", "PIP Overlay", "ISO REC"].map((route, index) => (
-                    <div key={route} className="mb-2 border border-[#3c4a42] bg-[#131316] p-2">
-                      <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-[#86948a]">{route}</div>
-                      <div className="truncate font-mono text-[11px] text-[#4edea3]">{index === 0 ? videoRows[0]?.[0] : "UNASSIGNED"}</div>
+                  </Panel>
+                  <Panel title="Parser Normalization" icon="tune" className="col-span-12">
+                    <div className="grid grid-cols-3 gap-2">
+                      <ToggleRow
+                        label="Auto-correct encoding anomalies"
+                        checked={settings.autoCorrectEncoding}
+                        onChange={(autoCorrectEncoding) => updateSettings({ autoCorrectEncoding })}
+                      />
+                      <ToggleRow
+                        label="Strip non-biblical metadata"
+                        checked={settings.stripMetadataOnImport}
+                        onChange={(stripMetadataOnImport) => updateSettings({ stripMetadataOnImport })}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void chooseBibleDb()}
+                        className="border border-[#3c4a42] bg-[#131316] px-3 py-2 text-left font-mono text-[10px] uppercase tracking-[0.14em]"
+                      >
+                        DB: {bibleDbPath ? "LINKED" : "CHOOSE"}
+                      </button>
                     </div>
-                  ))}
-                </Panel>
-              </>
-            )}
+                  </Panel>
+                </>
+              )}
 
-            {active === "integrations" && (
-              <>
-                <Panel title="Secure Integrations" icon="key" className="col-span-6">
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="DeepSpeech Model Path">
-                      <div className="flex gap-2">
-                        <Input value={deepspeechModelPath} onChange={setDeepspeechModelPath} placeholder={hasDeepSpeechModel ? "stored" : "missing"} />
-                        <button type="button" onClick={async () => {
-                          const res = await extendedElectron().pickDeepSpeechModel?.();
-                          if (res?.path) setDeepspeechModelPath(res.path);
-                        }} className="rounded-sm border border-[#3c4a42] bg-[#131316] px-3 py-2 text-[10px]">Choose</button>
-                      </div>
-                    </Field>
-                    <Field label="DeepSpeech Scorer (optional)">
-                      <div className="flex gap-2">
-                        <Input value={deepspeechScorerPath} onChange={setDeepspeechScorerPath} placeholder={deepspeechScorerPath ? "stored" : "missing"} />
-                        <button type="button" onClick={async () => {
-                          const res = await extendedElectron().pickDeepSpeechScorer?.();
-                          if (res?.path) setDeepspeechScorerPath(res.path);
-                        }} className="rounded-sm border border-[#3c4a42] bg-[#131316] px-3 py-2 text-[10px]">Choose</button>
-                      </div>
-                    </Field>
-                    <Field label="AWS Access Key">
-                      <Input value={awsAccessKey} onChange={setAwsAccessKey} placeholder={hasAwsCreds ? "stored" : "missing"} />
-                    </Field>
-                    <Field label="AWS Secret">
-                      <Input value={awsSecretKey} type="password" onChange={setAwsSecretKey} placeholder={hasAwsCreds ? "stored" : "missing"} />
-                    </Field>
-                    <Field label="AWS Region">
-                      <Input value={awsRegion} onChange={setAwsRegion} />
-                    </Field>
-                    <Field label="Polly Voice">
-                      <Input value={pollyVoice} onChange={setPollyVoice} />
-                    </Field>
-                    <button
-                      type="button"
-                      onClick={() => void saveIntegrations()}
-                      className="mt-5 h-8 border border-[#4edea3] bg-[#10b981] font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-[#003824]"
-                    >
-                      Save Keys
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const resp = await extendedElectron().loadDeepSpeechModel?.();
-                        if (resp?.success) setStatus("DeepSpeech model loaded.");
-                        else setStatus(resp?.error || "Model load failed.");
-                      }}
-                      className="mt-5 h-8 border border-[#3c4a42] bg-[#131316] font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-[#bbcabf]"
-                    >
-                      Load Model
-                    </button>
-                  </div>
-                </Panel>
-                <Panel title="Status" icon="security" className="col-span-6">
-                  <div className="grid grid-cols-2 gap-2">
-                    <Stat label="DeepSpeech Model" value={hasDeepSpeechModel ? "STORED" : "MISSING"} />
-                    <Stat label="AWS Creds" value={hasAwsCreds ? "STORED" : "MISSING"} />
-                    <Stat label="Region" value={awsRegion} />
-                    <Stat label="Voice" value={pollyVoice} />
-                    <button
-                      type="button"
-                      onClick={() => void chooseBibleDb()}
-                      className="col-span-2 h-8 border border-[#3c4a42] bg-[#131316] font-mono text-[10px] uppercase tracking-[0.16em]"
-                    >
-                      {bibleDbPath ? "Bible DB Linked" : "Choose Bible DB"}
-                    </button>
-                  </div>
-                </Panel>
-              </>
-            )}
+              {active === "routing" && (
+                <>
+                  {/* Output Routing Configuration - uses IIFE to define local variables */}
+                  {(() => {
+                    const cameraInputs = state.cameraInputs ?? [];
+                    const routingSourceOptions = [
+                      { value: "MAIN_OUTPUT", label: "Main Output (Full Program)" },
+                      { value: "PREVIEW", label: "Preview Canvas" },
+                      ...cameraInputs.map((cam) => ({
+                        value: String(cam.id),
+                        label: cam.name || `Input ${cam.id}`,
+                      })),
+                    ];
 
-            {active === "about" && (
-              <>
-                <Panel title="HallelujahBeamer" icon="settings_input_antenna" className="col-span-7">
-                  <div className="flex h-72 flex-col items-center justify-center border border-[#3c4a42] bg-[#0e0e11] text-center">
-                    <Icon name="settings_input_antenna" className="text-[52px] text-[#4edea3]" />
-                    <div className="mt-3 text-[28px] font-semibold">HallelujahBeamer</div>
-                    <div className="mt-2 border border-[#3c4a42] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em]">
-                      v0.1.0-stable
+                    const configOutput = selectedConfigOutputId
+                      ? selectedOutputs.find((o) => o.id === selectedConfigOutputId)
+                      : null;
+
+                    const currentRouteValue = selectedConfigOutputId
+                      ? String(settings.outputRoutingMap?.[selectedConfigOutputId] ?? "MAIN_OUTPUT")
+                      : "MAIN_OUTPUT";
+
+                    const handleRouteChange = (newValue: string): void => {
+                      if (!selectedConfigOutputId) return;
+                      const mapped: string | number =
+                        newValue === "MAIN_OUTPUT" || newValue === "PREVIEW"
+                          ? newValue
+                          : Number(newValue);
+                      const next = { ...(settings.outputRoutingMap ?? {}), [selectedConfigOutputId]: mapped };
+                      updateSettings({ outputRoutingMap: next });
+                    };
+
+                    return (
+                      <>
+                        <Panel title="Output Settings" icon="display_settings" className="col-span-5">
+                          <div className="grid gap-3">
+                            {/* Source Routing Selector */}
+                            <div className="border border-[#3c4a42] bg-[#0e0e11] p-3">
+                              <div className="mb-2 font-mono text-[9px] uppercase tracking-[0.2em] text-[#4edea3]">
+                                Signal Source Routing
+                              </div>
+                              {configOutput ? (
+                                <>
+                                  <div className="mb-2 flex items-center gap-2">
+                                    <div className="h-1.5 w-1.5 rounded-full bg-[#4edea3]" />
+                                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#e4e1e6]">
+                                      Routing for: {configOutput.label}
+                                    </span>
+                                  </div>
+                                  <div className="relative">
+                                    <select
+                                      value={currentRouteValue}
+                                      onChange={(e) => handleRouteChange(e.target.value)}
+                                      className="w-full border border-[#3c4a42] bg-[#131316] px-3 py-2 font-mono text-[11px] text-[#e4e1e6] focus:border-[#4edea3] focus:outline-none appearance-none"
+                                      style={{ backgroundImage: "none" }}
+                                    >
+                                      {routingSourceOptions.map((opt) => (
+                                        <option key={opt.value} value={opt.value}>
+                                          {opt.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <div className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">
+                                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#4edea3" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <polyline points="3,4 6,7 9,4" />
+                                      </svg>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 font-mono text-[9px] text-[#89968d]">
+                                    → This source will project when GO LIVE is activated for {configOutput.label}
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="flex h-16 items-center justify-center border border-dashed border-[#3c4a42]">
+                                  <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#748078]">
+                                    ← Select an output to configure routing
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            <Field label="Lower Third Style">
+                              <Segmented
+                                value={settings.lowerThirdStyle}
+                                options={LOWER_THIRDS}
+                                onChange={(lowerThirdStyle) =>
+                                  updateSettings({
+                                    lowerThirdStyle,
+                                    scriptureLowerThirdStyle: lowerThirdStyle,
+                                  })
+                                }
+                              />
+                            </Field>
+                            <Field label="Resolution">
+                              <Select
+                                value={settings.defaultOutputResolution}
+                                onChange={(defaultOutputResolution) => updateSettings({ defaultOutputResolution })}
+                              >
+                                {RESOLUTIONS.map((resolution) => (
+                                  <option key={resolution}>{resolution}</option>
+                                ))}
+                              </Select>
+                            </Field>
+                            <ToggleRow
+                              label="Alpha channel"
+                              checked={settings.enableAlphaChannel}
+                              onChange={(enableAlphaChannel) => updateSettings({ enableAlphaChannel })}
+                            />
+                            <ToggleRow
+                              label="Screen mirror"
+                              checked={settings.enableScreenMirrorOutput}
+                              onChange={(enableScreenMirrorOutput) => updateSettings({ enableScreenMirrorOutput })}
+                            />
+                          </div>
+                        </Panel>
+                        <Panel title="Output Routing" icon="hub" className="col-span-7">
+                          <div className="mb-3 font-mono text-[9px] uppercase tracking-[0.16em] text-[#748078]">
+                            Click an output row to configure its source
+                          </div>
+                          <OutputGrid
+                            outputs={selectedOutputs}
+                            onToggle={toggleOutput}
+                            selectedConfigId={selectedConfigOutputId}
+                            onSelectConfig={(id) =>
+                              setSelectedConfigOutputId((prev) => (prev === id ? undefined : id))
+                            }
+                          />
+                          {selectedOutputs.length === 0 && (
+                            <div className="mt-4 flex h-20 items-center justify-center border border-dashed border-[#3c4a42]">
+                              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#748078]">
+                                No outputs detected
+                              </span>
+                            </div>
+                          )}
+                          {/* Routing Summary Table */}
+                          {selectedOutputs.length > 0 && (
+                            <div className="mt-4 border border-[#24332b] bg-[#0e0e11]">
+                              <div className="border-b border-[#24332b] px-3 py-2 font-mono text-[9px] uppercase tracking-[0.2em] text-[#4edea3]">
+                                Active Routing Map
+                              </div>
+                              <table className="w-full table-fixed font-mono text-[10px]">
+                                <tbody>
+                                  {selectedOutputs.map((output) => {
+                                    const src = settings.outputRoutingMap?.[output.id];
+                                    const srcLabel =
+                                      src === "PREVIEW"
+                                        ? "Preview Canvas"
+                                        : typeof src === "number"
+                                          ? (state.cameraInputs?.find((c) => c.id === src)?.name ?? `Input ${src}`)
+                                          : "Main Output";
+                                    return (
+                                      <tr
+                                        key={output.id}
+                                        className="border-b border-[#1f1f22] last:border-b-0"
+                                      >
+                                        <td className="truncate px-3 py-1.5 text-[#bbcabf]">{output.label}</td>
+                                        <td className="truncate px-3 py-1.5 text-right text-[#4edea3]">
+                                          → {srcLabel}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </Panel>
+                      </>
+                    );
+                  })()}
+                </>
+              )}
+
+              {active === "mapping" && <ScreenMapping outputs={selectedOutputs} />}
+              {active === "ndi" && <NdiPipeline outputs={selectedOutputs} />}
+              {active === "matrix" && <OutputMatrix outputs={selectedOutputs} onToggle={toggleOutput} settings={settings} updateSettings={updateSettings} />}
+
+              {active === "patching" && <PatchMatrix outputs={selectedOutputs} onToggle={toggleOutput} />}
+
+              {active === "video" && (
+                <>
+                  <Panel title="Input Discovery Matrix" icon="videocam" className="col-span-4">
+                    <table className="w-full text-left font-mono text-[11px]">
+                      <tbody>
+                        {videoRows.map(([name, source, signal]) => (
+                          <tr key={name} className="border-b border-[#3c4a42]">
+                            <td className="py-2">
+                              <div className="text-[#4edea3]">{name}</div>
+                              <div className="text-[9px] uppercase tracking-[0.14em] text-[#86948a]">{source}</div>
+                            </td>
+                            <td className="py-2 text-right">{signal}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Panel>
+                  <Panel title="Preview / Luma" icon="center_focus_strong" className="col-span-5">
+                    <div className="flex h-64 items-center justify-center border border-[#3c4a42] bg-[#050506]">
+                      <div className="text-center font-mono">
+                        <Icon name="videocam" className="mb-2 text-[36px] text-[#4edea3]" />
+                        <div className="text-[12px] uppercase tracking-[0.2em]">Media Device Preview</div>
+                        <div className="mt-1 text-[10px] text-[#86948a]">{videoRows[0]?.[0]}</div>
+                      </div>
                     </div>
-                    <div className="mt-2 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[#4edea3]">
-                      <Dot /> Activated
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      <Bar value={68} />
+                      <Bar value={48} tone="amber" />
+                      <Bar value={28} />
                     </div>
-                  </div>
-                </Panel>
-                <Panel title="System Information" icon="memory" className="col-span-5">
-                  <div className="grid grid-cols-2 gap-2">
-                    <Stat label="Build Node" value="XENO-09A" />
-                    <Stat label="Runtime" value="V8.x" />
-                    <Stat label="Hardware" value="HB-774-KPL" />
-                    <Stat label="Updated" value="2026-04-12" />
-                  </div>
-                  <div className="mt-3 border border-[#3c4a42] bg-[#131316] p-3 text-[12px] leading-5 text-[#bbcabf]">
-                    Core engine architecture and signal processing algorithms developed in-house.
-                  </div>
-                  <div className="mt-2 border border-[#3c4a42] bg-[#131316] p-3 font-mono text-[11px] leading-5 text-[#bbcabf]">
-                    Proprietary software. Commercial deployment requires active validation.
-                  </div>
-                </Panel>
-              </>
-            )}
+                  </Panel>
+                  <Panel title="Patch & Route" icon="output" className="col-span-3">
+                    {["PGM Bus", "PIP Overlay", "ISO REC"].map((route, index) => (
+                      <div key={route} className="mb-2 border border-[#3c4a42] bg-[#131316] p-2">
+                        <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-[#86948a]">{route}</div>
+                        <div className="truncate font-mono text-[11px] text-[#4edea3]">{index === 0 ? videoRows[0]?.[0] : "UNASSIGNED"}</div>
+                      </div>
+                    ))}
+                  </Panel>
+                </>
+              )}
+
+              {active === "integrations" && (
+                <>
+                  <Panel title="Secure Integrations" icon="key" className="col-span-6">
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="AWS Access Key">
+                        <Input value={awsAccessKey} onChange={setAwsAccessKey} placeholder={hasAwsCreds ? "stored" : "missing"} />
+                      </Field>
+                      <Field label="AWS Secret">
+                        <Input value={awsSecretKey} type="password" onChange={setAwsSecretKey} placeholder={hasAwsCreds ? "stored" : "missing"} />
+                      </Field>
+                      <Field label="AWS Region">
+                        <Input value={awsRegion} onChange={setAwsRegion} />
+                      </Field>
+                      <Field label="Polly Voice">
+                        <Input value={pollyVoice} onChange={setPollyVoice} />
+                      </Field>
+                      <button
+                        type="button"
+                        onClick={() => void saveIntegrations()}
+                        className="mt-5 h-8 border border-[#4edea3] bg-[#10b981] font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-[#003824]"
+                      >
+                        Save Keys
+                      </button>
+                    </div>
+                  </Panel>
+                  <Panel title="Status" icon="security" className="col-span-6">
+                    <div className="grid grid-cols-2 gap-2">
+                      <Stat label="AWS Creds" value={hasAwsCreds ? "STORED" : "MISSING"} />
+                      <Stat label="Region" value={awsRegion} />
+                      <Stat label="Voice" value={pollyVoice} />
+                      <button
+                        type="button"
+                        onClick={() => void chooseBibleDb()}
+                        className="col-span-2 h-8 border border-[#3c4a42] bg-[#131316] font-mono text-[10px] uppercase tracking-[0.16em]"
+                      >
+                        {bibleDbPath ? "Bible DB Linked" : "Choose Bible DB"}
+                      </button>
+                    </div>
+                  </Panel>
+                </>
+              )}
+
+              {active === "about" && (
+                <>
+                  <Panel title="HallelujahBeamer" icon="settings_input_antenna" className="col-span-7">
+                    <div className="flex h-72 flex-col items-center justify-center border border-[#3c4a42] bg-[#0e0e11] text-center">
+                      <Icon name="settings_input_antenna" className="text-[52px] text-[#4edea3]" />
+                      <div className="mt-3 text-[28px] font-semibold">HallelujahBeamer</div>
+                      <div className="mt-2 border border-[#3c4a42] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em]">
+                        v0.1.0-stable
+                      </div>
+                      <div className="mt-2 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[#4edea3]">
+                        <Dot /> Activated
+                      </div>
+                    </div>
+                  </Panel>
+                  <Panel title="System Information" icon="memory" className="col-span-5">
+                    <div className="grid grid-cols-2 gap-2">
+                      <Stat label="Build Node" value="XENO-09A" />
+                      <Stat label="Runtime" value="V8.x" />
+                      <Stat label="Hardware" value="HB-774-KPL" />
+                      <Stat label="Updated" value="2026-04-12" />
+                    </div>
+                    <div className="mt-3 border border-[#3c4a42] bg-[#131316] p-3 text-[12px] leading-5 text-[#bbcabf]">
+                      Core engine architecture and signal processing algorithms developed in-house.
+                    </div>
+                    <div className="mt-2 border border-[#3c4a42] bg-[#131316] p-3 font-mono text-[11px] leading-5 text-[#bbcabf]">
+                      Proprietary software. Commercial deployment requires active validation.
+                    </div>
+                  </Panel>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -2329,33 +2433,51 @@ function ToggleRow({
 function OutputGrid({
   outputs,
   onToggle,
+  selectedConfigId,
+  onSelectConfig,
 }: {
   outputs: Array<{ id: string; label: string; kind: string; selected: boolean }>;
   onToggle: (id: string) => Promise<void>;
+  selectedConfigId?: string;
+  onSelectConfig?: (id: string) => void;
 }) {
   return (
     <div className="grid grid-cols-2 gap-2">
-      {outputs.map((output) => (
-        <button
-          key={output.id}
-          type="button"
-          onClick={() => void onToggle(output.id)}
-          className={cx(
-            "flex h-12 items-center justify-between border px-3 text-left",
-            output.selected
-              ? "border-[#4edea3] bg-[#10b981]/15 text-[#4edea3]"
-              : "border-[#3c4a42] bg-[#131316]",
-          )}
-        >
-          <span className="min-w-0">
-            <span className="block truncate font-mono text-[10px] uppercase tracking-[0.14em]">
-              {output.label}
+      {outputs.map((output) => {
+        const isConfigSelected = selectedConfigId === output.id;
+        
+        return (
+          <div
+            key={output.id}
+            onClick={() => onSelectConfig?.(output.id)}
+            className={cx(
+              "flex h-12 items-center justify-between border pl-3 pr-2 text-left transition-colors",
+              onSelectConfig ? "cursor-pointer hover:border-[#4edea3]/50" : "",
+              isConfigSelected ? "border-[#4edea3] bg-[#2a2a2d]" : "border-[#3c4a42] bg-[#131316]"
+            )}
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-mono text-[10px] uppercase tracking-[0.14em] text-[#e4e1e6]">
+                {output.label}
+              </span>
+              <span className="block font-mono text-[9px] text-[#86948a]">{output.kind}</span>
             </span>
-            <span className="block font-mono text-[9px] text-[#86948a]">{output.kind}</span>
-          </span>
-          <Dot tone={output.selected ? "green" : "dim"} />
-        </button>
-      ))}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                void onToggle(output.id);
+              }}
+              className={cx(
+                "flex h-7 px-3 shrink-0 items-center justify-center border font-mono text-[9px] font-bold uppercase tracking-[0.1em]",
+                output.selected ? "border-[#4edea3] bg-[#10b981]/15 text-[#4edea3]" : "border-[#3c4a42] bg-[#0e0e11] text-[#86948a] hover:border-[#86948a]"
+              )}
+            >
+              {output.selected ? "ACTIVE" : "STANDBY"}
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

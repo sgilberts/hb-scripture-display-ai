@@ -36,9 +36,10 @@ function RendererSwitch(): JSX.Element {
   }, [mode]);
 
   if (mode === "output") {
+    const outputId = new URLSearchParams(window.location.search).get("outputId") || undefined;
     return (
       <div className="h-screen w-screen bg-black">
-        <OutputCanvas />
+        <OutputCanvas renderCameras={true} outputId={outputId} />
       </div>
     );
   }

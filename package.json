@@ -8,21 +8,17 @@
   "private": true,
   "scripts": {
     "build:main": "tsc -p src/main/tsconfig.json",
-    "build:renderer": "vite build src/renderer",
+    "build:renderer": "vite build --config src/renderer/vite.config.ts",
     "build": "npm run build:main && npm run build:renderer",
-    "postinstall": "electron-rebuild -f -w deepspeech || true && node scripts/ci/auto-fetch-deepspeech-artifact.js || true",
-    "set-github-artifact-token": "node scripts/ci/store-github-token.js",
-    "auto-fetch-deepspeech-artifact": "node scripts/ci/auto-fetch-deepspeech-artifact.js",
-    "fetch-deepspeech-artifact": "node scripts/ci/fetch-deepspeech-artifact.js",
     "start": "npm run build && cross-env NODE_ENV=production electron ."
   },
   "dependencies": {
     "@aws-sdk/client-polly": "^3.366.0",
-    "deepspeech": "^0.9.3",
     "keytar": "^7.9.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^5.1.7",
+    "vosk-browser": "^0.0.8"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
@@ -45,7 +41,8 @@
     "asar": true,
     "files": [
       "dist/**/*",
-      "package.json"
+      "package.json",
+      "hallelujahbeamer.sqlite"
     ],
     "mac": {
       "target": [

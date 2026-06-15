@@ -5,6 +5,7 @@ import sqlite3 from "sqlite3";
 import type {
   ScriptureNavigationDirection,
   ScriptureRecord
+  // @ts-ignore
 } from "../shared/types";
 
 const sqlite = sqlite3.verbose();
@@ -179,7 +180,7 @@ export function normalizeWhitespace(value: string): string {
 }
 
 export function normalizeBookName(value: string): string {
-  return normalizeWhitespace(value.replace(/\./g, ""));
+  return normalizeWhitespace(value.replace(/[^\w\s]/gi, ""));
 }
 
 export function deriveBookShort(bookFull: string): string {
@@ -366,8 +367,8 @@ function getReferenceSearchPlan(
       FROM scriptures
       WHERE translation = ?
         AND (
-          LOWER(bookFull) = ?
-          OR LOWER(bookShort) = ?
+          LOWER(REPLACE(REPLACE(REPLACE(bookFull, '.', ''), ',', ''), ';', '')) = ?
+          OR LOWER(REPLACE(REPLACE(REPLACE(bookShort, '.', ''), ',', ''), ';', '')) = ?
           OR LOWER(bookFull) LIKE ?
           OR LOWER(bookShort) LIKE ?
         )
@@ -808,7 +809,8 @@ async function getAdjacentChapterRecord(
   );
 }
 
-export async function navigateScripture(
+async function navigateScriptureInDatabase(
+  database: SQLiteDatabase,
   reference: string,
   translation: string,
   direction: ScriptureNavigationDirection
@@ -819,7 +821,6 @@ export async function navigateScripture(
     return null;
   }
 
-  const database = await initializeDatabase();
   const currentRecord = await getCurrentReferenceRecord(
     database,
     reference,
@@ -878,4 +879,33 @@ export async function navigateScripture(
     currentRecord,
     direction
   );
+}
+
+export async function navigateScripture(
+  reference: string,
+  translation: string,
+  direction: ScriptureNavigationDirection
+): Promise<ScriptureRecord | null> {
+  const database = await initializeDatabase();
+  return navigateScriptureInDatabase(database, reference, translation, direction);
+}
+
+export async function navigateScriptureInPath(
+  filePath: string,
+  reference: string,
+  translation: string,
+  direction: ScriptureNavigationDirection
+): Promise<ScriptureRecord | null> {
+  const sourceDatabase = await openReadOnlyDatabase(filePath);
+
+  try {
+    return await navigateScriptureInDatabase(
+      sourceDatabase,
+      reference,
+      translation,
+      direction
+    );
+  } finally {
+    sourceDatabase.close();
+  }
 }

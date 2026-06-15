@@ -4,6 +4,7 @@ import {
   dialog,
   globalShortcut,
   ipcMain,
+  protocol,
   screen,
   session,
   type BrowserWindowConstructorOptions,
@@ -20,6 +21,7 @@ import {
   getInstalledTranslations,
   initializeDatabase,
   navigateScripture,
+  navigateScriptureInPath,
   searchVerses,
   searchVersesInPath,
 } from "./db";
@@ -31,7 +33,57 @@ import type {
   LowerThirdStyle,
   OutputTarget,
   ScriptureNavigationDirection,
+  ThemeDefinition,
+  CameraInput,
+  InputSetting,
+  // @ts-ignore
 } from "../shared/types";
+
+const VOSK_MODEL_PROTOCOL = "hb-vosk";
+const VOSK_MODEL_ARCHIVE = "vosk-model-small-en-us-0.15.tar.gz";
+const VOSK_MODEL_ARCHIVES = new Set([VOSK_MODEL_ARCHIVE]);
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: VOSK_MODEL_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
+]);
+
+function buildContentSecurityPolicy(isDev: boolean): string {
+  const devConnectSources = isDev
+    ? [
+        "http://localhost:*",
+        "http://127.0.0.1:*",
+        "ws://localhost:*",
+        "ws://127.0.0.1:*",
+      ]
+    : [];
+
+  const devAssetSources = isDev
+    ? ["http://localhost:*", "http://127.0.0.1:*"]
+    : [];
+
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    `img-src 'self' https: file: data: blob: ${devAssetSources.join(" ")}`.trim(),
+    "font-src 'self' data:",
+    `connect-src 'self' hb-vosk: https: data: blob: ${devConnectSources.join(" ")}`.trim(),
+    "media-src 'self' file: data: blob:",
+    "worker-src 'self' blob:",
+    "child-src 'self' blob:",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
 
 interface ProjectionUpdatePayload {
   currentTextOutput: string;
@@ -41,6 +93,7 @@ interface ProjectionUpdatePayload {
   isLiveMode: boolean;
   verseHoldFlag: boolean;
   isAutoDisplayMode: boolean;
+  isScriptureParaphraseMode: boolean;
   currentBibleTranslation: string;
   selectedOutputIds: string[];
   selectedAudioDeviceId: string;
@@ -56,6 +109,19 @@ interface ProjectionUpdatePayload {
   backgroundPositionY: number;
   textPositionX: number;
   textPositionY: number;
+  customThemes: ThemeDefinition[];
+  defaultThemeId_SCRIPTURES: string | null;
+  defaultThemeId_LYRICS: string | null;
+  defaultThemeId_TIMER: string | null;
+  previewInputId: number | null;
+  outputInputId: number | null;
+  layerToCameraMap: Record<number, number>;
+  cameraThemeMap: Record<number, string>;
+  cameraMultiviews: Record<number, Record<number, number>>;
+  cameraInputs: CameraInput[];
+  inputSettings: Record<number, InputSetting>;
+  videoPlaybackState?: Record<number, boolean>;
+  outputRoutingMap?: Record<string, string | number>;
 }
 
 interface BibleImportResponse {
@@ -75,6 +141,7 @@ interface AppSettings {
   enableAlphaChannel: boolean;
   enableScreenMirrorOutput: boolean;
   isAutoDisplayMode: boolean;
+  isScriptureParaphraseMode: boolean;
   outputOpacity: number;
   inputGain: number;
   selectedAudioDeviceId: string;
@@ -93,6 +160,11 @@ interface AppSettings {
   backgroundPositionY: number;
   textPositionX: number;
   textPositionY: number;
+  customThemes: ThemeDefinition[];
+  defaultThemeId_SCRIPTURES: string | null;
+  defaultThemeId_LYRICS: string | null;
+  defaultThemeId_TIMER: string | null;
+  outputRoutingMap?: Record<string, string | number>;
   // Optional stored API key for AI audio (Gemini). Stored securely in settings file.
   geminiApiKey?: string;
   // Non-secret integration settings (secrets are stored in OS keychain via keytar)
@@ -182,6 +254,7 @@ const DEFAULT_PROJECTION_STATE: ProjectionUpdatePayload = {
   isLiveMode: false,
   verseHoldFlag: false,
   isAutoDisplayMode: false,
+  isScriptureParaphraseMode: false,
   currentBibleTranslation: "KJV",
   selectedOutputIds: [],
   selectedAudioDeviceId: "default",
@@ -197,6 +270,18 @@ const DEFAULT_PROJECTION_STATE: ProjectionUpdatePayload = {
   backgroundPositionY: 50,
   textPositionX: 50,
   textPositionY: 50,
+  customThemes: [],
+  defaultThemeId_SCRIPTURES: null,
+  defaultThemeId_LYRICS: null,
+  defaultThemeId_TIMER: null,
+  previewInputId: null,
+  outputInputId: null,
+  layerToCameraMap: {},
+  cameraThemeMap: {},
+  cameraMultiviews: {},
+  cameraInputs: [],
+  inputSettings: {},
+  videoPlaybackState: {},
 };
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -208,6 +293,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   enableAlphaChannel: false,
   enableScreenMirrorOutput: false,
   isAutoDisplayMode: false,
+  isScriptureParaphraseMode: false,
   outputOpacity: 100,
   inputGain: 100,
   selectedAudioDeviceId: "default",
@@ -226,6 +312,11 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   backgroundPositionY: 50,
   textPositionX: 50,
   textPositionY: 50,
+  customThemes: [],
+  defaultThemeId_SCRIPTURES: null,
+  defaultThemeId_LYRICS: null,
+  defaultThemeId_TIMER: null,
+  outputRoutingMap: {},
   // Stored Gemini/Google API key (optional)
   geminiApiKey: "",
   // Default AWS region and Polly voice
@@ -381,6 +472,14 @@ async function importBackgroundImage(sourcePath: string): Promise<string> {
   return destinationPath;
 }
 
+async function importCanvasMedia(sourcePath: string): Promise<string> {
+  const assetsDirectory = await getBackgroundAssetsDirectory();
+  const fileName = `canvas-${Date.now()}-${path.basename(sourcePath)}`;
+  const destinationPath = path.join(assetsDirectory, fileName);
+  await copyFile(sourcePath, destinationPath);
+  return destinationPath;
+}
+
 async function loadSettings(): Promise<AppSettings> {
   const settingsPath = await getSettingsPath();
 
@@ -397,9 +496,7 @@ async function loadSettings(): Promise<AppSettings> {
         ) || DEFAULT_APP_SETTINGS.currentBibleTranslation,
       selectedOutputIds: normalizeOutputIds(parsed.selectedOutputIds),
       displayFormat:
-        parsed.displayFormat === "LOWER_THIRD"
-          ? "LOWER_THIRD"
-          : "FULL",
+        parsed.displayFormat === "LOWER_THIRD" ? "LOWER_THIRD" : "FULL",
       activeTheme:
         parsed.activeTheme === "GREEN_SCREEN" ||
         parsed.activeTheme === "TRANSPARENT"
@@ -415,6 +512,9 @@ async function loadSettings(): Promise<AppSettings> {
         DEFAULT_APP_SETTINGS.enableScreenMirrorOutput,
       isAutoDisplayMode:
         parsed.isAutoDisplayMode ?? DEFAULT_APP_SETTINGS.isAutoDisplayMode,
+      isScriptureParaphraseMode:
+        parsed.isScriptureParaphraseMode ??
+        DEFAULT_APP_SETTINGS.isScriptureParaphraseMode,
       outputOpacity:
         typeof parsed.outputOpacity === "number"
           ? Math.max(0, Math.min(100, parsed.outputOpacity))
@@ -477,6 +577,11 @@ async function loadSettings(): Promise<AppSettings> {
       backgroundPositionY: clampPosition(parsed.backgroundPositionY),
       textPositionX: clampPosition(parsed.textPositionX),
       textPositionY: clampPosition(parsed.textPositionY),
+      customThemes: Array.isArray(parsed.customThemes) ? parsed.customThemes : [],
+      defaultThemeId_SCRIPTURES: parsed.defaultThemeId_SCRIPTURES || null,
+      defaultThemeId_LYRICS: parsed.defaultThemeId_LYRICS || null,
+      defaultThemeId_TIMER: parsed.defaultThemeId_TIMER || null,
+      outputRoutingMap: parsed.outputRoutingMap || {},
     };
   } catch {
     return { ...DEFAULT_APP_SETTINGS };
@@ -496,11 +601,8 @@ async function saveSettings(nextSettings: Partial<AppSettings>): Promise<void> {
     selectedOutputIds: normalizeOutputIds(
       nextSettings.selectedOutputIds ?? cachedSettings.selectedOutputIds,
     ),
-    displayFormat:
-      nextSettings.displayFormat ??
-      cachedSettings.displayFormat,
-    activeTheme:
-      nextSettings.activeTheme ?? cachedSettings.activeTheme,
+    displayFormat: nextSettings.displayFormat ?? cachedSettings.displayFormat,
+    activeTheme: nextSettings.activeTheme ?? cachedSettings.activeTheme,
     defaultOutputResolution:
       nextSettings.defaultOutputResolution ??
       cachedSettings.defaultOutputResolution,
@@ -511,6 +613,9 @@ async function saveSettings(nextSettings: Partial<AppSettings>): Promise<void> {
       cachedSettings.enableScreenMirrorOutput,
     isAutoDisplayMode:
       nextSettings.isAutoDisplayMode ?? cachedSettings.isAutoDisplayMode,
+    isScriptureParaphraseMode:
+      nextSettings.isScriptureParaphraseMode ??
+      cachedSettings.isScriptureParaphraseMode,
     outputOpacity:
       typeof nextSettings.outputOpacity === "number"
         ? Math.max(0, Math.min(100, nextSettings.outputOpacity))
@@ -525,15 +630,18 @@ async function saveSettings(nextSettings: Partial<AppSettings>): Promise<void> {
         ? nextSettings.selectedAudioDeviceId
         : cachedSettings.selectedAudioDeviceId,
     geminiApiKey:
-      typeof nextSettings.geminiApiKey === "string" && nextSettings.geminiApiKey.trim()
+      typeof nextSettings.geminiApiKey === "string" &&
+      nextSettings.geminiApiKey.trim()
         ? nextSettings.geminiApiKey
         : cachedSettings.geminiApiKey,
     awsRegion:
-      typeof nextSettings.awsRegion === "string" && nextSettings.awsRegion.trim()
+      typeof nextSettings.awsRegion === "string" &&
+      nextSettings.awsRegion.trim()
         ? nextSettings.awsRegion
         : cachedSettings.awsRegion,
     pollyVoiceId:
-      typeof nextSettings.pollyVoiceId === "string" && nextSettings.pollyVoiceId.trim()
+      typeof nextSettings.pollyVoiceId === "string" &&
+      nextSettings.pollyVoiceId.trim()
         ? nextSettings.pollyVoiceId
         : cachedSettings.pollyVoiceId,
     bibleDatabasePath:
@@ -593,6 +701,11 @@ async function saveSettings(nextSettings: Partial<AppSettings>): Promise<void> {
       nextSettings.textPositionY ?? cachedSettings.textPositionY,
       cachedSettings.textPositionY,
     ),
+    customThemes: nextSettings.customThemes ?? cachedSettings.customThemes,
+    defaultThemeId_SCRIPTURES: nextSettings.defaultThemeId_SCRIPTURES ?? cachedSettings.defaultThemeId_SCRIPTURES,
+    defaultThemeId_LYRICS: nextSettings.defaultThemeId_LYRICS ?? cachedSettings.defaultThemeId_LYRICS,
+    defaultThemeId_TIMER: nextSettings.defaultThemeId_TIMER ?? cachedSettings.defaultThemeId_TIMER,
+    outputRoutingMap: nextSettings.outputRoutingMap ?? cachedSettings.outputRoutingMap,
   };
 
   cachedSettings = merged;
@@ -610,6 +723,74 @@ function getRendererEntryPath(): string {
 
 function getPreloadPath(): string {
   return path.join(__dirname, "preload.js");
+}
+
+function getVoskModelArchivePath(fileName = VOSK_MODEL_ARCHIVE): string {
+  if (!app.isPackaged && process.env.NODE_ENV !== "production") {
+    return path.join(__dirname, "../renderer/public/vosk-models", fileName);
+  }
+  return path.join(__dirname, "../renderer/vosk-models", fileName);
+}
+
+function getVoskModelUrl(fileName = VOSK_MODEL_ARCHIVE): string {
+  return `${VOSK_MODEL_PROTOCOL}://models/${encodeURIComponent(fileName)}`;
+}
+
+function getVoskModelFileName(requestUrl: string): string | null {
+  const url = new URL(requestUrl);
+  const fileName = path.basename(decodeURIComponent(url.pathname));
+
+  if (!VOSK_MODEL_ARCHIVES.has(fileName)) {
+    return null;
+  }
+
+  return fileName;
+}
+
+async function registerVoskModelProtocol(): Promise<void> {
+  protocol.handle(VOSK_MODEL_PROTOCOL, async (request) => {
+    const fileName = getVoskModelFileName(request.url);
+
+    if (!fileName) {
+      console.warn(
+        "VOSK model protocol: Rejected unknown model URL:",
+        request.url,
+      );
+      return new Response("Unknown VOSK model", { status: 404 });
+    }
+
+    const archivePath = getVoskModelArchivePath(fileName);
+    console.log("VOSK model protocol: Fetch URL:", request.url);
+    console.log("VOSK model protocol: Resolved model path:", archivePath);
+
+    try {
+      const archive = await readFile(archivePath);
+      const headers = new Headers({
+        "content-type": "application/gzip",
+        "content-length": String(archive.byteLength),
+        "cache-control": "no-cache",
+      });
+
+      console.log(
+        "VOSK model protocol: Fetch success:",
+        fileName,
+        `${archive.byteLength} bytes`,
+      );
+
+      if (request.method === "HEAD") {
+        return new Response(null, { status: 200, headers });
+      }
+
+      return new Response(archive, { status: 200, headers });
+    } catch (error) {
+      console.error(
+        "VOSK model protocol: Fetch failure:",
+        archivePath,
+        error,
+      );
+      return new Response("VOSK model archive not found", { status: 404 });
+    }
+  });
 }
 
 function deriveSuggestedTranslation(filePath: string): string {
@@ -687,13 +868,18 @@ async function ensureDeepSpeechModelLoaded(): Promise<boolean> {
     deepspeechModel = new DS.Model(modelPath);
     if ((cachedSettings as any).deepspeechScorerPath) {
       try {
-        deepspeechModel.enableExternalScorer((cachedSettings as any).deepspeechScorerPath);
+        deepspeechModel.enableExternalScorer(
+          (cachedSettings as any).deepspeechScorerPath,
+        );
       } catch (err) {
         console.warn("Failed to enable DeepSpeech scorer:", err);
       }
     }
     // Most DeepSpeech models target 16kHz audio
-    deepspeechSampleRate = typeof deepspeechModel.sampleRate === "function" ? deepspeechModel.sampleRate() : 16000;
+    deepspeechSampleRate =
+      typeof deepspeechModel.sampleRate === "function"
+        ? deepspeechModel.sampleRate()
+        : 16000;
     return true;
   } catch (err) {
     console.warn("DeepSpeech model load failed:", err);
@@ -702,45 +888,35 @@ async function ensureDeepSpeechModelLoaded(): Promise<boolean> {
   }
 }
 
-async function transcribeAudioWithDeepSpeech(audioData: ArrayBuffer | Buffer, sampleRate: number): Promise<{ transcript?: string; error?: string }> {
-  try {
-    if (!(await ensureDeepSpeechModelLoaded())) {
-      return { error: "DeepSpeech model is not configured or failed to load. Set model path in Settings." };
-    }
-
-    const buf = Buffer.isBuffer(audioData) ? audioData : Buffer.from(audioData);
-    // Expect 16-bit PCM (Int16) little-endian
-    if (buf.length % 2 !== 0) {
-      // odd length, still attempt to handle
-    }
-
-    const int16 = new Int16Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 2));
-    if (sampleRate !== deepspeechSampleRate) {
-      return { error: `Unexpected sample rate ${sampleRate}Hz; DeepSpeech model expects ${deepspeechSampleRate}Hz. Resample audio to ${deepspeechSampleRate}Hz in the renderer.` };
-    }
-
-    const transcript = deepspeechModel.stt(int16);
-    return { transcript };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
+async function transcribeAudioWithDeepSpeech(
+  audioData: ArrayBuffer | Buffer,
+  sampleRate: number,
+): Promise<{ transcript?: string; error?: string }> {
+  return { error: "DeepSpeech functionality is disabled." };
 }
 
-async function getAwsCredentials(): Promise<{ accessKeyId: string | null; secretAccessKey: string | null }> {
+async function getAwsCredentials(): Promise<{
+  accessKeyId: string | null;
+  secretAccessKey: string | null;
+}> {
   const accessKeyIdSecret = await getSecret("awsAccessKeyId");
   const secretAccessKeySecret = await getSecret("awsSecretAccessKey");
 
   const accessKeyId =
     accessKeyIdSecret ||
-    (typeof (cachedSettings as any).awsAccessKeyId === "string" && (cachedSettings as any).awsAccessKeyId.trim()
+    (typeof (cachedSettings as any).awsAccessKeyId === "string" &&
+    (cachedSettings as any).awsAccessKeyId.trim()
       ? (cachedSettings as any).awsAccessKeyId
-      : process.env.AWS_ACCESS_KEY_ID) || null;
+      : process.env.AWS_ACCESS_KEY_ID) ||
+    null;
 
   const secretAccessKey =
     secretAccessKeySecret ||
-    (typeof (cachedSettings as any).awsSecretAccessKey === "string" && (cachedSettings as any).awsSecretAccessKey.trim()
+    (typeof (cachedSettings as any).awsSecretAccessKey === "string" &&
+    (cachedSettings as any).awsSecretAccessKey.trim()
       ? (cachedSettings as any).awsSecretAccessKey
-      : process.env.AWS_SECRET_ACCESS_KEY) || null;
+      : process.env.AWS_SECRET_ACCESS_KEY) ||
+    null;
 
   return { accessKeyId, secretAccessKey };
 }
@@ -802,77 +978,12 @@ async function analyzeAudioScripture(
   audioData: ArrayBuffer,
   mimeType: string,
 ): Promise<AudioScriptureAnalysis> {
-  const apiKey = getGeminiApiKey();
-
-  if (!apiKey) {
-    return {
-      transcript: "",
-      aiEnabled: false,
-    };
-  }
-
-  const audioBase64 = Buffer.from(audioData).toString("base64");
-  let response: {
-    ok: boolean;
-    statusCode: number;
-    data: GeminiGenerateContentResponse;
+  return {
+    transcript: "",
+    aiEnabled: false,
+    error: "Gemini analysis is disabled.",
   };
-
-  try {
-    response = await postJson<GeminiGenerateContentResponse>(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        contents: [
-          {
-            parts: [
-              {
-                text: "Transcribe this church service audio. You must return only a valid JSON object with keys: transcript (string), scriptureReference (string, e.g., 'John 3:16'), and searchQuery (string, best search query). If no specific reference found, fill transcript and searchQuery, but leave scriptureReference undefined. Return ONLY the JSON object, no Markdown code blocks or other text.",
-              },
-              {
-                inlineData: {
-                  mimeType: mimeType || "audio/webm",
-                  data: audioBase64,
-                },
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: "application/json",
-        },
-      },
-    );
-  } catch (error) {
-    return {
-      transcript: "",
-      aiEnabled: true,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Gemini audio analysis request failed.",
-    };
-  }
-
-  const data = response.data;
-
-  if (!response.ok) {
-    return {
-      transcript: "",
-      aiEnabled: true,
-      error: data.error?.message ?? "Gemini audio analysis failed.",
-    };
-  }
-
-  const responseText =
-    data.candidates?.[0]?.content?.parts
-      ?.map((part) => part.text ?? "")
-      .join("")
-      .trim() ?? "";
-
-  return normalizeGeminiAnalysis(responseText, true);
 }
-
 
 async function streamToBuffer(stream: any): Promise<Buffer> {
   if (!stream) return Buffer.alloc(0);
@@ -893,14 +1004,16 @@ async function synthesizeVoicePolly(
   format: string = "mp3",
 ): Promise<{ audioBase64?: string; error?: string }> {
   const { accessKeyId, secretAccessKey } = await getAwsCredentials();
-  const region = cachedSettings.awsRegion || process.env.AWS_REGION || "us-east-1";
+  const region =
+    cachedSettings.awsRegion || process.env.AWS_REGION || "us-east-1";
 
   if (!accessKeyId || !secretAccessKey) {
     return { error: "AWS credentials are not configured." };
   }
 
   try {
-    const { PollyClient, SynthesizeSpeechCommand } = await import("@aws-sdk/client-polly");
+    const { PollyClient, SynthesizeSpeechCommand } =
+      await import("@aws-sdk/client-polly");
     const polly = new PollyClient({
       region,
       credentials: { accessKeyId, secretAccessKey },
@@ -1040,13 +1153,12 @@ function buildTranslationPromptMarkup(
           </form>
         </div>
         <script>
-          const { ipcRenderer } = require("electron");
           const form = document.getElementById("translation-form");
           const input = document.getElementById("translation-tag");
           const cancelButton = document.getElementById("cancel-button");
 
           function sendValue(value) {
-            ipcRenderer.send("${responseChannel}", value);
+            window.electron.submitTranslationTag("${responseChannel}", value);
           }
 
           form.addEventListener("submit", (event) => {
@@ -1090,8 +1202,10 @@ function promptForTranslationTag(
       show: false,
       backgroundColor: "#131316",
       webPreferences: {
-        contextIsolation: false,
-        nodeIntegration: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        preload: getPreloadPath(),
       },
     });
 
@@ -1140,18 +1254,24 @@ function promptForTranslationTag(
 async function loadRenderer(
   window: BrowserWindow,
   role: "main" | "output",
+  outputId?: string,
 ): Promise<void> {
   const devServerUrl = getRendererEntryUrl();
 
   if (devServerUrl) {
     const url = new URL(devServerUrl);
     url.searchParams.set("window", role);
+    if (outputId) url.searchParams.set("outputId", outputId);
     await window.loadURL(url.toString());
     return;
   }
 
+  const searchParams = new URLSearchParams();
+  searchParams.set("window", role);
+  if (outputId) searchParams.set("outputId", outputId);
+
   await window.loadFile(getRendererEntryPath(), {
-    search: `?window=${role}`,
+    search: `?${searchParams.toString()}`,
   });
 }
 
@@ -1182,13 +1302,16 @@ function createMainWindow(operatorDisplay: Display): BrowserWindow {
     height: Math.max(800, Math.min(height, 900)),
     minWidth: 1280,
     minHeight: 800,
-    backgroundColor: "#09090b",
+    backgroundColor: "#00000000",
+    transparent: true,
     title: "HallelujahBeamer",
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       preload: getPreloadPath(),
+      backgroundThrottling: false,
     },
   };
 
@@ -1306,6 +1429,7 @@ function createOutputWindow(
     display && display.id === screen.getPrimaryDisplay().id,
   );
   const window = new BrowserWindow({
+    type: "panel",
     x: bounds.x,
     y: bounds.y,
     width: bounds.width,
@@ -1325,7 +1449,9 @@ function createOutputWindow(
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       preload: getPreloadPath(),
+      backgroundThrottling: false,
     },
   });
 
@@ -1340,14 +1466,26 @@ function createOutputWindow(
     window.setAspectRatio(16 / 9);
   }
 
+  // Prevent projection from being minimized
+  // @ts-ignore - TS complains about "minimize" not being a valid event overload
+  window.on("minimize", (e: any) => {
+    e.preventDefault();
+    if (window.isMinimized()) {
+      window.restore();
+    }
+  });
+
   window.webContents.once("did-finish-load", () => {
     window.webContents.send("render-text", latestProjectionState);
   });
 
-  void loadRenderer(window, "output");
+  void loadRenderer(window, "output", target.id);
 
   window.on("closed", () => {
-    outputWindows.delete(target.id);
+    const record = outputWindows.get(target.id);
+    if (record && record.window === window) {
+      outputWindows.delete(target.id);
+    }
   });
 
   return window;
@@ -1382,20 +1520,19 @@ function applyOutputWindowSettings(): void {
 function syncOutputWindows(): void {
   const availableOutputs = getAvailableOutputs();
 
-  if (!latestProjectionState.isLiveMode) {
-    closeAllOutputWindows();
-    syncEscapeShortcutState();
-    return;
-  }
-
   const selectedOutputs = availableOutputs.filter((output) => output.selected);
   const windowedOutputs = selectedOutputs.filter(
     (output) => output.kind === "DISPLAY" || output.kind === "NDI",
   );
-  const selectedIds = new Set(windowedOutputs.map((output) => output.id));
+  
+  const shouldBeOpenIds = new Set(
+    latestProjectionState.isLiveMode
+      ? windowedOutputs.map((output) => output.id)
+      : [],
+  );
 
   for (const [outputId, record] of outputWindows.entries()) {
-    if (!selectedIds.has(outputId)) {
+    if (!shouldBeOpenIds.has(outputId)) {
       if (!record.window.isDestroyed()) {
         record.window.close();
       }
@@ -1403,7 +1540,16 @@ function syncOutputWindows(): void {
     }
   }
 
+  if (!latestProjectionState.isLiveMode && shouldBeOpenIds.size === 0) {
+    syncEscapeShortcutState();
+    return;
+  }
+
   for (const output of windowedOutputs) {
+    if (!shouldBeOpenIds.has(output.id)) {
+      continue;
+    }
+
     const existingRecord = outputWindows.get(output.id);
 
     if (existingRecord && !existingRecord.window.isDestroyed()) {
@@ -1457,6 +1603,9 @@ function normalizeProjectionUpdate(
     verseHoldFlag: payload.verseHoldFlag ?? latestProjectionState.verseHoldFlag,
     isAutoDisplayMode:
       payload.isAutoDisplayMode ?? latestProjectionState.isAutoDisplayMode,
+    isScriptureParaphraseMode:
+      payload.isScriptureParaphraseMode ??
+      latestProjectionState.isScriptureParaphraseMode,
     currentBibleTranslation:
       normalizeTranslationTag(
         payload.currentBibleTranslation ??
@@ -1516,6 +1665,19 @@ function normalizeProjectionUpdate(
       payload.textPositionY ?? latestProjectionState.textPositionY,
       latestProjectionState.textPositionY,
     ),
+    customThemes: payload.customThemes ?? latestProjectionState.customThemes,
+    defaultThemeId_SCRIPTURES: payload.defaultThemeId_SCRIPTURES ?? latestProjectionState.defaultThemeId_SCRIPTURES,
+    defaultThemeId_LYRICS: payload.defaultThemeId_LYRICS ?? latestProjectionState.defaultThemeId_LYRICS,
+    defaultThemeId_TIMER: payload.defaultThemeId_TIMER ?? latestProjectionState.defaultThemeId_TIMER,
+    previewInputId: payload.previewInputId !== undefined ? payload.previewInputId : latestProjectionState.previewInputId,
+    outputInputId: payload.outputInputId !== undefined ? payload.outputInputId : latestProjectionState.outputInputId,
+    layerToCameraMap: payload.layerToCameraMap ?? latestProjectionState.layerToCameraMap,
+    cameraThemeMap: payload.cameraThemeMap ?? latestProjectionState.cameraThemeMap,
+    cameraMultiviews: payload.cameraMultiviews ?? latestProjectionState.cameraMultiviews,
+    cameraInputs: payload.cameraInputs ?? latestProjectionState.cameraInputs,
+    inputSettings: payload.inputSettings ?? latestProjectionState.inputSettings,
+    videoPlaybackState: payload.videoPlaybackState ?? latestProjectionState.videoPlaybackState,
+    outputRoutingMap: payload.outputRoutingMap ?? latestProjectionState.outputRoutingMap,
   };
 }
 
@@ -1608,7 +1770,13 @@ async function handleBibleImportPicker(): Promise<BibleImportResponse> {
 }
 
 function registerAppLifecycle(): void {
+  // Disable background throttling to ensure real-time projection
+  app.commandLine.appendSwitch('disable-background-timer-throttling');
+  app.commandLine.appendSwitch('disable-renderer-backgrounding');
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows', 'true');
+
   app.whenReady().then(async () => {
+    await registerVoskModelProtocol();
     await initializeDatabase();
     cachedSettings = await loadSettings();
     latestProjectionState = {
@@ -1617,6 +1785,7 @@ function registerAppLifecycle(): void {
       selectedOutputIds: cachedSettings.selectedOutputIds,
       displayFormat: cachedSettings.displayFormat,
       activeTheme: cachedSettings.activeTheme,
+      isScriptureParaphraseMode: cachedSettings.isScriptureParaphraseMode,
       lowerThirdStyle: cachedSettings.lowerThirdStyle,
       outputFontFamily: cachedSettings.outputFontFamily,
       outputFontSize: cachedSettings.outputFontSize,
@@ -1630,6 +1799,24 @@ function registerAppLifecycle(): void {
       textPositionX: cachedSettings.textPositionX,
       textPositionY: cachedSettings.textPositionY,
     };
+
+    const isDev = !app.isPackaged && process.env.NODE_ENV !== "production";
+
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      const csp = buildContentSecurityPolicy(isDev);
+
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          "Content-Security-Policy": [csp],
+        },
+      });
+    });
+
+    console.log(
+      "Electron security: Content-Security-Policy:",
+      buildContentSecurityPolicy(isDev),
+    );
 
     session.defaultSession.setPermissionRequestHandler(
       (_webContents, permission, callback) => {
@@ -1653,6 +1840,15 @@ function registerAppLifecycle(): void {
     });
 
     ipcMain.on("update-projection", handleProjectionUpdateEvent);
+    
+    ipcMain.on("sync-video-time", (event, cameraId: number, time: number) => {
+      for (const record of outputWindows.values()) {
+        if (!record.window.isDestroyed()) {
+          record.window.webContents.send("sync-video-time", cameraId, time);
+        }
+      }
+    });
+
     ipcMain.handle(
       "db-query-scripture",
       async (_event, queryStr: string, translation: string) => {
@@ -1683,7 +1879,26 @@ function registerAppLifecycle(): void {
         reference: string,
         translation: string,
         direction: ScriptureNavigationDirection,
-      ) => navigateScripture(reference, translation, direction),
+      ) => {
+        if (cachedSettings.bibleDatabasePath) {
+          try {
+            const result = await navigateScriptureInPath(
+              cachedSettings.bibleDatabasePath,
+              reference,
+              translation,
+              direction,
+            );
+
+            if (result) {
+              return result;
+            }
+          } catch (err) {
+            console.warn("External Bible DB navigation failed:", err);
+          }
+        }
+
+        return navigateScripture(reference, translation, direction);
+      },
     );
     ipcMain.handle(
       "analyze-audio-scripture",
@@ -1697,14 +1912,13 @@ function registerAppLifecycle(): void {
     );
     ipcMain.handle(
       "synthesize-voice-polly",
-      async (_event, text: string, voiceId: string | undefined, format: string | undefined) =>
-        synthesizeVoicePolly(text, voiceId, format),
+      async (
+        _event,
+        text: string,
+        voiceId: string | undefined,
+        format: string | undefined,
+      ) => synthesizeVoicePolly(text, voiceId, format),
     );
-    ipcMain.handle("has-audio-ai-provider", async () => {
-      const hasGemini = Boolean(getGeminiApiKey());
-      const hasDeepSpeech = Boolean((cachedSettings as any).deepspeechModelPath) || Boolean(deepspeechModel);
-      return Boolean(hasGemini || hasDeepSpeech);
-    });
     ipcMain.handle("open-bible-picker", async () => handleBibleImportPicker());
     ipcMain.handle("pick-bible-database", async () => {
       const ownerWindow = BrowserWindow.getFocusedWindow() ?? mainWindow;
@@ -1735,6 +1949,11 @@ function registerAppLifecycle(): void {
         return { canceled: true, path: null };
       }
     });
+    ipcMain.handle("import-canvas-media", async (_event, sourcePath: string) => {
+      const importedPath = await importCanvasMedia(sourcePath);
+      return { path: importedPath };
+    });
+
     ipcMain.handle("pick-background-image", async () => {
       const ownerWindow = BrowserWindow.getFocusedWindow() ?? mainWindow;
       const dialogOptions: OpenDialogOptions = {
@@ -1787,48 +2006,96 @@ function registerAppLifecycle(): void {
       },
     );
     ipcMain.handle("get-output-targets", async () => getAvailableOutputs());
-    ipcMain.handle("get-app-settings", async () => cachedSettings);
-    ipcMain.handle("save-integration-settings", async (_event, settings: { deepspeechModelPath?: string; deepspeechScorerPath?: string; awsAccessKeyId?: string; awsSecretAccessKey?: string; awsRegion?: string; pollyVoiceId?: string; bibleDatabasePath?: string }) => {
-      try {
-        if (settings.awsAccessKeyId) await setSecret("awsAccessKeyId", settings.awsAccessKeyId);
-        if (settings.awsSecretAccessKey) await setSecret("awsSecretAccessKey", settings.awsSecretAccessKey);
-        const nonSecret: Partial<AppSettings> = {};
-        if (typeof settings.awsRegion === "string") nonSecret.awsRegion = settings.awsRegion;
-        if (typeof settings.pollyVoiceId === "string") nonSecret.pollyVoiceId = settings.pollyVoiceId;
-        if (typeof settings.bibleDatabasePath === "string") nonSecret.bibleDatabasePath = settings.bibleDatabasePath;
-        if (typeof settings.deepspeechModelPath === "string") nonSecret.deepspeechModelPath = settings.deepspeechModelPath;
-        if (typeof settings.deepspeechScorerPath === "string") nonSecret.deepspeechScorerPath = settings.deepspeechScorerPath;
-        if (Object.keys(nonSecret).length > 0) await saveSettings(nonSecret);
-        // invalidate loaded model so it will be reloaded on demand
-        deepspeechModel = null;
-        return { success: true };
-      } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
-      }
+    ipcMain.handle("resolve-vosk-model-url", async () => {
+      const archivePath = getVoskModelArchivePath();
+      const url = getVoskModelUrl();
+
+      console.log("VOSK model resolver: Resolved model path:", archivePath);
+      console.log("VOSK model resolver: Fetch URL:", url);
+
+      return {
+        archivePath,
+        url,
+      };
     });
+    ipcMain.handle("get-app-settings", async () => cachedSettings);
+    ipcMain.handle(
+      "save-integration-settings",
+      async (
+        _event,
+        settings: {
+          deepspeechModelPath?: string;
+          deepspeechScorerPath?: string;
+          awsAccessKeyId?: string;
+          awsSecretAccessKey?: string;
+          awsRegion?: string;
+          pollyVoiceId?: string;
+          bibleDatabasePath?: string;
+        },
+      ) => {
+        try {
+          if (settings.awsAccessKeyId)
+            await setSecret("awsAccessKeyId", settings.awsAccessKeyId);
+          if (settings.awsSecretAccessKey)
+            await setSecret("awsSecretAccessKey", settings.awsSecretAccessKey);
+          const nonSecret: Partial<AppSettings> = {};
+          if (typeof settings.awsRegion === "string")
+            nonSecret.awsRegion = settings.awsRegion;
+          if (typeof settings.pollyVoiceId === "string")
+            nonSecret.pollyVoiceId = settings.pollyVoiceId;
+          if (typeof settings.bibleDatabasePath === "string")
+            nonSecret.bibleDatabasePath = settings.bibleDatabasePath;
+          if (typeof settings.deepspeechModelPath === "string")
+            nonSecret.deepspeechModelPath = settings.deepspeechModelPath;
+          if (typeof settings.deepspeechScorerPath === "string")
+            nonSecret.deepspeechScorerPath = settings.deepspeechScorerPath;
+          if (Object.keys(nonSecret).length > 0) await saveSettings(nonSecret);
+          // invalidate loaded model so it will be reloaded on demand
+          deepspeechModel = null;
+          return { success: true };
+        } catch (err) {
+          return {
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      },
+    );
     ipcMain.handle("get-integration-status", async () => {
       try {
         const awsAccessId = await getSecret("awsAccessKeyId");
         const awsSecret = await getSecret("awsSecretAccessKey");
-        const hasDeepModel = Boolean((cachedSettings as any).deepspeechModelPath) || Boolean(deepspeechModel);
+        const hasDeepModel =
+          Boolean((cachedSettings as any).deepspeechModelPath) ||
+          Boolean(deepspeechModel);
         return {
           hasDeepSpeechModel: hasDeepModel,
-          hasAwsCreds: Boolean((awsAccessId && awsSecret) || (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY)),
+          hasAwsCreds: Boolean(
+            (awsAccessId && awsSecret) ||
+            (process.env.AWS_ACCESS_KEY_ID &&
+              process.env.AWS_SECRET_ACCESS_KEY),
+          ),
           awsRegion: cachedSettings.awsRegion || process.env.AWS_REGION || null,
           pollyVoiceId: cachedSettings.pollyVoiceId || null,
           bibleDatabasePath: cachedSettings.bibleDatabasePath || null,
-          deepspeechModelPath: (cachedSettings as any).deepspeechModelPath || null,
-          deepspeechScorerPath: (cachedSettings as any).deepspeechScorerPath || null
+          deepspeechModelPath:
+            (cachedSettings as any).deepspeechModelPath || null,
+          deepspeechScorerPath:
+            (cachedSettings as any).deepspeechScorerPath || null,
         };
       } catch {
         return {
-          hasDeepSpeechModel: Boolean((cachedSettings as any).deepspeechModelPath) || Boolean(deepspeechModel),
+          hasDeepSpeechModel:
+            Boolean((cachedSettings as any).deepspeechModelPath) ||
+            Boolean(deepspeechModel),
           hasAwsCreds: false,
           awsRegion: cachedSettings.awsRegion || process.env.AWS_REGION || null,
           pollyVoiceId: cachedSettings.pollyVoiceId || null,
           bibleDatabasePath: cachedSettings.bibleDatabasePath || null,
-          deepspeechModelPath: (cachedSettings as any).deepspeechModelPath || null,
-          deepspeechScorerPath: (cachedSettings as any).deepspeechScorerPath || null
+          deepspeechModelPath:
+            (cachedSettings as any).deepspeechModelPath || null,
+          deepspeechScorerPath:
+            (cachedSettings as any).deepspeechScorerPath || null,
         };
       }
     });
@@ -1838,14 +2105,19 @@ function registerAppLifecycle(): void {
         await deleteSecret("awsSecretAccessKey");
         return { success: true };
       } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
       }
     });
     ipcMain.handle("pick-deepspeech-model", async () => {
       const ownerWindow = BrowserWindow.getFocusedWindow() ?? mainWindow;
       const pickerOptions: OpenDialogOptions = {
         properties: ["openFile"],
-        filters: [{ name: "DeepSpeech Model", extensions: ["pbmm", "tflite", "pb"] }],
+        filters: [
+          { name: "DeepSpeech Model", extensions: ["pbmm", "tflite", "pb"] },
+        ],
       };
       const picked = ownerWindow
         ? await dialog.showOpenDialog(ownerWindow, pickerOptions)
@@ -1892,7 +2164,11 @@ function registerAppLifecycle(): void {
     ipcMain.handle("load-deepspeech-model", async () => {
       const loaded = await ensureDeepSpeechModelLoaded();
       if (loaded) return { success: true };
-      return { success: false, error: "Failed to load DeepSpeech model. Ensure model path is set and deepspeech module is installed." };
+      return {
+        success: false,
+        error:
+          "Failed to load DeepSpeech model. Ensure model path is set and deepspeech module is installed.",
+      };
     });
     ipcMain.handle(
       "save-app-settings",
@@ -1934,12 +2210,12 @@ function registerAppLifecycle(): void {
     ipcMain.removeHandler("db-query-scripture");
     ipcMain.removeHandler("db-navigate-scripture");
     ipcMain.removeHandler("analyze-audio-scripture");
-    ipcMain.removeHandler("has-audio-ai-provider");
     ipcMain.removeHandler("open-bible-picker");
     ipcMain.removeHandler("pick-background-image");
     ipcMain.removeHandler("get-translations");
     ipcMain.removeHandler("delete-translation");
     ipcMain.removeHandler("get-output-targets");
+    ipcMain.removeHandler("resolve-vosk-model-url");
     ipcMain.removeHandler("get-app-settings");
     ipcMain.removeHandler("save-app-settings");
     ipcMain.removeAllListeners("exit-output-fullscreen");

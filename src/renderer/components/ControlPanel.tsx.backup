@@ -1,0 +1,1422 @@
+import {
+  startTransition,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
+import type {
+  LowerThirdStyle,
+  ScriptureNavigationDirection,
+  ScriptureRecord,
+  ThemeType,
+} from "../../shared/types";
+import { useAppState } from "../context/AppState";
+import { PreviewErrorBoundary } from "./PreviewErrorBoundary";
+import abstractBackgroundUrl from "../assets/abstract-motion-background.png";
+import OutputCanvas from "./OutputCanvas";
+
+interface ControlPanelProps {
+  onOpenSettings: () => void;
+}
+
+interface RailItem {
+  label: string;
+  icon: string;
+  active?: boolean;
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string;
+  confidence: number;
+}
+
+interface SpeechRecognitionResult {
+  readonly isFinal: boolean;
+  readonly length: number;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
+}
+
+interface SpeechRecognitionResultList {
+  readonly length: number;
+  item(index: number): SpeechRecognitionResult;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionEvent extends Event {
+  readonly resultIndex: number;
+  readonly results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  readonly error: string;
+  readonly message: string;
+}
+
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onend: (() => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+interface SpeechRecognitionConstructor {
+  new(): SpeechRecognition;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
+}
+
+const RAIL_ITEMS: RailItem[] = [
+  { label: "Sources", icon: "SRC" },
+  { label: "Layers", icon: "LYR" },
+  { label: "Outputs", icon: "OUT" },
+  { label: "Macros", icon: "MAC", active: true },
+  { label: "Settings", icon: "SET" },
+  { label: "System", icon: "SYS" },
+];
+
+const LOWER_THIRD_STYLES: Array<{ label: string; value: LowerThirdStyle }> = [
+  { label: "Classic", value: "CLASSIC" },
+  { label: "Banner", value: "BANNER" },
+  { label: "Minimal", value: "MINIMAL" },
+  { label: "Custom", value: "CUSTOM" },
+];
+
+function joinClasses(
+  ...values: Array<string | false | null | undefined>
+): string {
+  return values.filter(Boolean).join(" ");
+}
+
+function toReference(record: ScriptureRecord): string {
+  return `${record.bookFull} ${record.chapter}:${record.verse}`;
+}
+
+function isTruthyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function transcriptToNavigationCommand(
+  transcript: string,
+): ScriptureNavigationDirection | null {
+  const normalized = transcript
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const hasChapter = /\bchapter\b/.test(normalized);
+  const hasVerse = /\bverse\b/.test(normalized);
+  const saysNext = /\b(next|forward|forwards|advance|ahead)\b/.test(normalized);
+  const saysPrevious =
+    /\b(previous|prev|back|backward|backwards|before|prior|last)\b/.test(
+      normalized,
+    );
+
+  if (hasChapter && saysNext) {
+    return "NEXT_CHAPTER";
+  }
+
+  if (hasChapter && saysPrevious) {
+    return "PREVIOUS_CHAPTER";
+  }
+
+  if (
+    /\b(next verse|verse next|advance verse|forward verse|go forward)\b/.test(
+      normalized,
+    ) ||
+    normalized === "next"
+  ) {
+    return "NEXT_VERSE";
+  }
+
+  if (
+    /\b(previous verse|prev verse|verse before|before verse|prior verse|last verse|go back|back one|move back)\b/.test(
+      normalized,
+    ) ||
+    (hasVerse && saysPrevious) ||
+    normalized === "previous" ||
+    normalized === "prev" ||
+    normalized === "back"
+  ) {
+    return "PREVIOUS_VERSE";
+  }
+
+  if (hasVerse && saysNext) {
+    return "NEXT_VERSE";
+  }
+
+  return null;
+}
+
+function StatusLed({
+  active,
+  tone = "green",
+}: {
+  active: boolean;
+  tone?: "green" | "amber";
+}) {
+  return (
+    <span
+      className={joinClasses(
+        "block h-3 w-3 rounded-full border",
+        active && tone === "green"
+          ? "border-[#6ffbbe] bg-[#4edea3] shadow-[0_0_18px_rgba(78,222,163,0.82)]"
+          : active
+            ? "border-[#ffddb8] bg-[#ffb95f] shadow-[0_0_16px_rgba(255,185,95,0.7)]"
+            : "border-[#3c4a42] bg-[#353438]",
+      )}
+    />
+  );
+}
+
+function ProjectionMonitor({
+  label,
+  active,
+}: {
+  label: string;
+  active?: boolean;
+}) {
+  return (
+    <section className="min-w-0">
+      <div
+        className={joinClasses(
+          "inline-flex border border-b-0 bg-[#1f1f22] px-2.5 py-1.5",
+          active ? "border-[#10b981]" : "border-[#3c4a42]",
+        )}
+      >
+        <span
+          className={joinClasses(
+            "font-mono text-[10px] font-semibold uppercase leading-none tracking-[0.1em]",
+            active ? "text-[#4edea3]" : "text-[#bbcabf]",
+          )}
+        >
+          {label}
+        </span>
+      </div>
+      <div
+        className={joinClasses(
+          "relative aspect-[16/9] overflow-hidden border bg-black",
+          active ? "border-[#10b981]" : "border-[#3c4a42]",
+        )}
+      >
+        <OutputCanvas
+          compact
+          indicatorLabel={active ? "LIVE" : "PREVIEW"}
+          indicatorTone={active ? "live" : "preview"}
+        />
+      </div>
+    </section>
+  );
+}
+
+export default function ControlPanel({
+  onOpenSettings,
+}: ControlPanelProps): JSX.Element {
+  const {
+    state,
+    availableTranslations,
+    availableOutputs,
+    setVerseHoldFlag,
+    setIsAutoDisplayMode,
+    setInputGain,
+    setSelectedAudioDeviceId,
+    setDisplayFormat,
+    patchState,
+    setActiveTheme,
+    setCurrentBibleTranslation,
+    setCurrentTextOutput,
+    setCurrentReferenceOutput,
+    setSelectedOutputIds,
+    refreshAvailableTranslations,
+    refreshAvailableOutputs,
+    triggerBibleImport,
+    searchScriptures,
+    navigateScripture,
+    startListening,
+    stopListening,
+  } = useAppState();
+
+  const [searchQuery, setSearchQuery] = useState(state.currentReferenceOutput);
+  const [searchResults, setSearchResults] = useState<ScriptureRecord[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [speechTranscript, setSpeechTranscript] = useState("");
+  const [isAudioListening, setIsAudioListening] = useState(false);
+  const [statusMessage, setStatusMessage] = useState(
+    "Control node online. Projection bus armed.",
+  );
+
+  const inputGain = state.inputGain;
+  const selectedAudioDeviceId = state.selectedAudioDeviceId;
+  const [inputLevel, setInputLevel] = useState(0);
+  const [inputLevelDb, setInputLevelDb] = useState(-60);
+  const selectedOutputCount =
+    state.selectedOutputIds.length ||
+    availableOutputs.filter((output) => output.selected).length;
+  const lastAnalyzedTranscriptRef = useRef("");
+  const lastNavigationCommandRef = useRef({ key: "", timestamp: 0 });
+  const audioAnalysisInFlightRef = useRef(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
+
+  useEffect(() => {
+    const handleSearchResults = (event: Event) => {
+      const customEvent = event as CustomEvent<{ results: ScriptureRecord[] }>;
+      if (customEvent.detail?.results) {
+        setSearchResults(customEvent.detail.results);
+      }
+    };
+    window.addEventListener("scriptureSearchResults", handleSearchResults);
+    return () => window.removeEventListener("scriptureSearchResults", handleSearchResults);
+  }, []);
+
+  const inputGainRef = useRef(inputGain);
+  const isAutoDisplayModeRef = useRef(state.isAutoDisplayMode);
+  const isSpeakingRef = useRef(false);
+
+  useEffect(() => {
+    inputGainRef.current = inputGain;
+  }, [inputGain]);
+
+  useEffect(() => {
+    isAutoDisplayModeRef.current = state.isAutoDisplayMode;
+  }, [state.isAutoDisplayMode]);
+  const handleOpenSettings = (): void => {
+    onOpenSettings();
+  };
+
+  const handleGoLiveToggle = async (): Promise<void> => {
+    const nextLive = !state.isLiveMode;
+
+    if (!nextLive) {
+      patchState({ isLiveMode: false });
+      setStatusMessage("Live output stand-by.");
+      return;
+    }
+
+    if (nextLive) {
+      const refreshedOutputs =
+        availableOutputs.length > 0
+          ? availableOutputs
+          : await refreshAvailableOutputs(state.selectedOutputIds);
+
+      const selectedIds =
+        state.selectedOutputIds.length > 0
+          ? state.selectedOutputIds
+          : refreshedOutputs
+            .filter(
+              (output) => output.kind === "DISPLAY" || output.kind === "NDI",
+            )
+            .slice(0, 2)
+            .map((output) => output.id);
+      const hasWindowedSelection = selectedIds.some((selectedId) => {
+        const match = refreshedOutputs.find(
+          (output) => output.id === selectedId,
+        );
+        return match?.kind === "DISPLAY" || match?.kind === "NDI";
+      });
+      const fallbackWindowedOutputs = refreshedOutputs
+        .filter((output) => output.kind === "DISPLAY" || output.kind === "NDI")
+        .slice(0, 2)
+        .map((output) => output.id);
+      const nextSelectedOutputIds = hasWindowedSelection
+        ? selectedIds
+        : Array.from(new Set([...selectedIds, ...fallbackWindowedOutputs]));
+
+      if (nextSelectedOutputIds.length > 0) {
+        patchState({
+          selectedOutputIds: nextSelectedOutputIds,
+          isLiveMode: nextLive,
+        });
+      } else {
+        patchState({ isLiveMode: nextLive });
+      }
+    }
+
+    setStatusMessage(nextLive ? "Go live armed." : "Live output stand-by.");
+  };
+
+  const semanticMatches = useMemo(() => {
+    if (searchResults.length > 0) {
+      return searchResults.slice(0, 4).map((result, index) => ({
+        id: `${result.translation}-${result.id}-${index}`,
+        reference: toReference(result),
+        text: result.text,
+        score: Math.max(63, 98 - index * 11),
+        record: result,
+      }));
+    }
+
+    return [
+      {
+        id: "default-match-primary",
+        reference: state.currentReferenceOutput || "John 3:16",
+        text: state.currentTextOutput || "For God so loved...",
+        score: 98,
+        record: null,
+      },
+      {
+        id: "default-match-secondary",
+        reference: "Romans 8:28",
+        text: "And we know that in all...",
+        score: 72,
+        record: null,
+      },
+    ];
+  }, [searchResults, state.currentReferenceOutput, state.currentTextOutput]);
+
+  useEffect(() => {
+    const load = async (): Promise<void> => {
+      try {
+        await refreshAvailableTranslations();
+        await refreshAvailableOutputs();
+      } finally {
+        // Any other ready logic
+      }
+    };
+
+    void load();
+  }, []);
+
+  useEffect(() => {
+    if (!searchQuery && isTruthyString(state.currentReferenceOutput)) {
+      setSearchQuery(state.currentReferenceOutput);
+    }
+  }, [searchQuery, state.currentReferenceOutput]);
+
+  const displayScriptureRecord = (
+    record: ScriptureRecord,
+    source = "Scripture loaded",
+  ): void => {
+    const reference = toReference(record);
+    setCurrentReferenceOutput(reference);
+    setCurrentTextOutput(record.text);
+    setSearchQuery(reference);
+    setStatusMessage(`${source}: ${reference}.`);
+  };
+
+  const runSearch = async (
+    queryOverride?: string,
+    translationOverride?: string,
+  ): Promise<ScriptureRecord[]> => {
+    const query = (queryOverride ?? searchQuery).trim();
+    const translation = translationOverride ?? state.currentBibleTranslation;
+
+    if (!query) {
+      setSearchResults([]);
+      setStatusMessage("Enter a scripture reference to search.");
+      return [];
+    }
+
+    setIsSearching(true);
+
+    try {
+      const results = await searchScriptures(query, translation);
+
+      startTransition(() => setSearchResults(results));
+
+      if (results.length > 0) {
+        const firstResult = results[0];
+        displayScriptureRecord(firstResult, "Preview updated");
+        setStatusMessage(
+          `${results.length} semantic match${results.length === 1 ? "" : "es"} loaded from ${translation}.`,
+        );
+
+        // Try to synthesize the first matching verse via Polly (if configured).
+        try {
+          if (!isSpeakingRef.current && window.electron?.synthesizePolly) {
+            isSpeakingRef.current = true;
+            const pollyResp = await window.electron.synthesizePolly(
+              firstResult.text,
+            );
+
+            if (pollyResp && (pollyResp as any).audioBase64) {
+              const audio = new Audio(
+                `data:audio/mp3;base64,${(pollyResp as any).audioBase64}`,
+              );
+              audio.play().catch(() => { });
+            }
+          }
+        } catch (err) {
+          console.warn("Polly synthesis failed:", err);
+        } finally {
+          isSpeakingRef.current = false;
+        }
+      } else {
+        setStatusMessage(
+          `No scripture match found in ${translation} for "${query}".`,
+        );
+      }
+
+      return results;
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unknown scripture search error.";
+      setStatusMessage(message);
+      return [];
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleNavigateScripture = async (
+    direction: ScriptureNavigationDirection,
+  ): Promise<void> => {
+    const reference = state.currentReferenceOutput.trim() || searchQuery.trim();
+
+    if (!reference) {
+      setStatusMessage(
+        "Load a scripture before using chapter and verse navigation.",
+      );
+      return;
+    }
+
+    const nextRecord = await navigateScripture(reference, direction);
+
+    if (!nextRecord) {
+      setStatusMessage(
+        "No adjacent scripture found in the current translation.",
+      );
+      return;
+    }
+
+    displayScriptureRecord(nextRecord, "Navigation");
+  };
+
+  const handleSearchKeyDown = (
+    event: KeyboardEvent<HTMLInputElement>,
+  ): void => {
+    if (event.key === "Enter") {
+      void runSearch();
+    }
+  };
+
+  const handleAudioDeviceChange = (deviceId: string): void => {
+    lastAnalyzedTranscriptRef.current = "";
+    setSpeechTranscript("");
+    setSelectedAudioDeviceId(deviceId || "default");
+    setStatusMessage("Audio input device selected.");
+  };
+
+  const handleTranslationChange = (translation: string): void => {
+    lastAnalyzedTranscriptRef.current = "";
+    setCurrentBibleTranslation(translation);
+    setSearchResults([]);
+    setCurrentTextOutput("");
+    setCurrentReferenceOutput("");
+    setSearchQuery("");
+
+    if (searchQuery.trim()) {
+      void runSearch(searchQuery.trim(), translation);
+    }
+  };
+
+  const toggleOutputTarget = (outputId: string): void => {
+    const nextSelected = state.selectedOutputIds.includes(outputId)
+      ? state.selectedOutputIds.filter((id) => id !== outputId)
+      : [...state.selectedOutputIds, outputId];
+
+    setSelectedOutputIds(nextSelected);
+    void window.electron?.saveAppSettings?.({
+      selectedOutputIds: nextSelected,
+    });
+    void refreshAvailableOutputs(nextSelected);
+  };
+
+  const handleImportBible = async (): Promise<void> => {
+    setIsImporting(true);
+
+    try {
+      const result = await triggerBibleImport();
+
+      if (result.canceled) {
+        setStatusMessage("Bible import cancelled.");
+        return;
+      }
+
+      if (result.success) {
+        await refreshAvailableTranslations();
+        await refreshAvailableOutputs();
+
+        if (isTruthyString(result.translation)) {
+          setCurrentBibleTranslation(result.translation);
+        }
+
+        setStatusMessage(
+          `${result.translation ?? "Translation"} installed with ${result.count} verse records.`,
+        );
+      } else {
+        setStatusMessage(result.error ?? "Bible import failed.");
+      }
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const chooseTheme = (theme: ThemeType): void => {
+    setActiveTheme(theme);
+    setStatusMessage(
+      `${theme.replace("_", " ")} theme armed for Bible output.`,
+    );
+  };
+
+  const handleAutoTranscript = (transcript: string, source: string): void => {
+    if (inputGainRef.current <= 0) {
+      return;
+    }
+
+    const normalizedTranscript = transcript.replace(/\s+/g, " ").trim();
+    const normalizedKey = normalizedTranscript.toLowerCase();
+
+    if (!normalizedTranscript || normalizedTranscript.length < 2) {
+      return;
+    }
+
+    const navigationCommand =
+      transcriptToNavigationCommand(normalizedTranscript);
+
+    if (navigationCommand) {
+      const now = Date.now();
+      const commandKey = `${navigationCommand}:${normalizedKey}`;
+
+      if (
+        lastNavigationCommandRef.current.key === commandKey &&
+        now - lastNavigationCommandRef.current.timestamp < 900
+      ) {
+        return;
+      }
+
+      lastNavigationCommandRef.current = {
+        key: commandKey,
+        timestamp: now,
+      };
+      setSpeechTranscript(normalizedTranscript);
+      setStatusMessage(
+        `Voice navigation: ${navigationCommand.replace("_", " ")}.`,
+      );
+      void handleNavigateScripture(navigationCommand);
+      return;
+    }
+
+    if (normalizedKey === lastAnalyzedTranscriptRef.current) {
+      return;
+    }
+
+    lastAnalyzedTranscriptRef.current = normalizedKey;
+    setSpeechTranscript(normalizedTranscript);
+    setSearchQuery(normalizedTranscript);
+    setStatusMessage(
+      `Auto-display heard "${normalizedTranscript}" from ${source}.`,
+    );
+    void runSearch(normalizedTranscript, state.currentBibleTranslation);
+  };
+
+  const getAudioRecorderMimeType = (): string => {
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+      "audio/ogg;codecs=opus",
+    ];
+
+    return (
+      candidates.find((candidate) =>
+        MediaRecorder.isTypeSupported(candidate),
+      ) ?? ""
+    );
+  };
+
+  const getSelectedAudioConstraints = (): MediaTrackConstraints => ({
+    ...(selectedAudioDeviceId
+      ? {
+        deviceId:
+          selectedAudioDeviceId === "default"
+            ? "default"
+            : { exact: selectedAudioDeviceId },
+      }
+      : {}),
+    autoGainControl: false,
+    echoCancellation: false,
+    noiseSuppression: false,
+  });
+
+  useEffect(() => {
+    inputGainRef.current = inputGain;
+  }, [inputGain]);
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      return;
+    }
+
+    const loadAudioDevices = async (): Promise<void> => {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setAudioDevices(devices.filter((device) => device.kind === "audioinput"));
+    };
+
+    void loadAudioDevices();
+  }, []);
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setInputLevel(0);
+      setInputLevelDb(-60);
+      return;
+    }
+
+    let cancelled = false;
+    let animationFrame = 0;
+    let stream: MediaStream | null = null;
+    let audioContext: AudioContext | null = null;
+
+    const startMeter = async (): Promise<void> => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: getSelectedAudioConstraints(),
+        });
+
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        audioContext = new AudioContext();
+        const source = audioContext.createMediaStreamSource(stream);
+        const gain = audioContext.createGain();
+        const analyser = audioContext.createAnalyser();
+
+        gain.gain.value = inputGain / 100;
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0.72;
+        const samples = new Uint8Array(analyser.fftSize);
+        source.connect(gain);
+        gain.connect(analyser);
+
+        const tick = (): void => {
+          analyser.getByteTimeDomainData(samples);
+
+          let sumSquares = 0;
+          for (const sample of samples) {
+            const centered = (sample - 128) / 128;
+            sumSquares += centered * centered;
+          }
+
+          const rms = Math.sqrt(sumSquares / samples.length);
+          const adjustedRms = inputGain <= 0 ? 0 : rms * (inputGain / 100);
+          const db =
+            inputGain <= 0
+              ? -60
+              : clampNumber(20 * Math.log10(adjustedRms || 0.000001), -60, 0);
+          const level = clampNumber(((db + 60) / 60) * 100, 0, 100);
+
+          setInputLevel(level);
+          setInputLevelDb(db);
+          animationFrame = window.requestAnimationFrame(tick);
+        };
+
+        tick();
+      } catch {
+        setInputLevel(0);
+        setInputLevelDb(-60);
+      }
+    };
+
+    void startMeter();
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(animationFrame);
+      stream?.getTracks().forEach((track) => track.stop());
+      void audioContext?.close();
+    };
+  }, [selectedAudioDeviceId, inputGain]);
+
+  useEffect(() => {
+    if (state.isAutoDisplayMode) {
+      return;
+    }
+
+    speechRecognitionRef.current?.stop();
+    speechRecognitionRef.current = null;
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+    setIsAudioListening(false);
+  }, [state.isAutoDisplayMode]);
+
+  return (
+    <main className="h-screen w-full overflow-hidden bg-[#131316] font-sans text-[#e4e1e6]">
+      <header className="fixed left-0 right-0 top-0 z-40 flex h-12 items-center border-b border-[#3c4a42] bg-[#131316]">
+        <div className="flex h-full w-[min(24rem,34vw)] min-w-[15rem] items-center px-3">
+          <h1 className="font-display-lg text-3xl text-inverse-surface tracking-tight mb-2">
+            <span className="font-bold text-white">Hallelujah</span>
+            <span className="text-[#10b981]">Beamer</span>
+          </h1>
+        </div>
+
+        <nav className="hidden h-full items-end gap-4 lg:flex">
+          {["Dashboard", "Monitors", "Patching", "Logs"].map((item, index) => (
+            <button
+              key={item}
+              type="button"
+              className={joinClasses(
+                "h-full border-b-2 px-1 pt-1 text-xs font-semibold tracking-normal transition",
+                index === 0
+                  ? "border-[#4edea3] text-[#4edea3]"
+                  : "border-transparent text-[#bbcabf] hover:text-[#e4e1e6]",
+              )}
+            >
+              {item}
+            </button>
+          ))}
+        </nav>
+
+        <div className="ml-auto flex h-full items-center gap-2 px-3">
+          <button
+            type="button"
+            onClick={() => void handleGoLiveToggle()}
+            className={joinClasses(
+              "h-9 min-w-[7rem] border px-4 font-mono text-[10px] font-bold uppercase tracking-[0.14em] transition active:scale-[0.99]",
+              state.isLiveMode
+                ? "border-[#4edea3] bg-[#4edea3] text-[#003824]"
+                : "border-[#4edea3] bg-[#4edea3] text-[#003824] hover:brightness-110",
+            )}
+          >
+            {state.isLiveMode ? "On Air" : "Go Live"}
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenSettings}
+            className="hidden h-9 w-9 place-items-center border border-transparent font-mono text-[11px] font-bold uppercase text-[#bbcabf] transition hover:border-[#3c4a42] hover:text-[#4edea3] sm:grid"
+            aria-label="Open settings"
+          >
+            SET
+          </button>
+          <button
+            type="button"
+            className="hidden h-9 w-9 place-items-center border border-transparent font-mono text-[11px] font-bold uppercase text-[#bbcabf] transition hover:border-[#3c4a42] hover:text-[#4edea3] sm:grid"
+            aria-label="Notifications"
+          >
+            ALT
+          </button>
+          <button
+            type="button"
+            className="hidden h-9 w-9 place-items-center border border-transparent font-mono text-[11px] font-bold uppercase text-[#bbcabf] transition hover:border-[#3c4a42] hover:text-[#4edea3] md:grid"
+            aria-label="Account"
+          >
+            ID
+          </button>
+        </div>
+      </header>
+
+      <div className="flex h-full pt-12">
+        <aside className="hidden w-14 shrink-0 flex-col border-r border-[#3c4a42] bg-[#1b1b1e] md:flex">
+          <div className="flex flex-col items-center gap-1.5 border-b border-[#3c4a42] px-1.5 py-3">
+            <div className="grid h-8 w-8 place-items-center rounded bg-[#353438] font-mono text-[10px] font-bold text-[#bbcabf]">
+              CN
+            </div>
+            <div className="text-center font-mono text-[9px] font-semibold leading-tight text-[#e4e1e6]">
+              <div>Control</div>
+              <div>Node 01</div>
+              <div className="mt-1 text-[8px] text-[#4edea3]">
+                Status: Online
+              </div>
+            </div>
+          </div>
+
+          <nav className="flex flex-1 flex-col items-center gap-1 py-3">
+            {RAIL_ITEMS.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={
+                  item.label === "Settings" ? handleOpenSettings : undefined
+                }
+                className={joinClasses(
+                  "flex w-11 flex-col items-center gap-1 border px-1 py-2 text-center transition",
+                  item.active
+                    ? "border-[#10b981] bg-[#10b981] text-[#003824]"
+                    : "border-transparent text-[#bbcabf] hover:border-[#3c4a42] hover:bg-[#2a2a2d] hover:text-[#e4e1e6]",
+                )}
+              >
+                <span className="font-mono text-[9px] font-bold leading-none">
+                  {item.icon}
+                </span>
+                <span className="text-[9px] font-semibold leading-none">
+                  {item.label}
+                </span>
+              </button>
+            ))}
+          </nav>
+
+          <div className="mt-auto flex flex-col items-center gap-3 px-1.5 pb-3">
+            <button
+              type="button"
+              onClick={() => {
+                patchState({ isLiveMode: false });
+                setStatusMessage("Emergency stop sent. Live output disabled.");
+              }}
+              className="w-full bg-[#93000a] px-1 py-2.5 font-mono text-[9px] font-bold uppercase leading-tight tracking-[0.08em] text-[#ffdad6] transition hover:bg-[#b00012]"
+            >
+              Emergency Stop
+            </button>
+            <button
+              type="button"
+              className="grid h-9 w-9 place-items-center rounded-full border border-[#86948a] font-mono text-[14px] font-bold text-[#bbcabf] transition hover:border-[#4edea3] hover:text-[#4edea3]"
+              aria-label="Support"
+            >
+              ?
+            </button>
+            <span className="text-[10px] font-semibold text-[#bbcabf]">
+              Support
+            </span>
+          </div>
+        </aside>
+
+        <section className="hidden w-[23vw] min-w-[18rem] max-w-[22rem] shrink-0 flex-col border-r border-[#3c4a42] bg-[#1f1f22] lg:flex">
+          <div className="border-b border-[#3c4a42] bg-[#2a2a2d] px-3 py-2">
+            <h2 className="font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[#e4e1e6]">
+              Media Settings
+            </h2>
+          </div>
+
+          <div className="flex flex-1 flex-col gap-3 p-2.5">
+            <label className="block">
+              <span className="mb-2 block font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#bbcabf]">
+                Audio Input Device
+              </span>
+              <select
+                value={selectedAudioDeviceId}
+                onChange={(event) =>
+                  handleAudioDeviceChange(event.target.value)
+                }
+                className="h-10 w-full border border-[#3c4a42] bg-[#131316] px-3 font-mono text-[11px] text-[#e4e1e6] outline-none transition focus:border-[#4edea3]"
+              >
+                <option value="default">System Default Input</option>
+                {audioDevices.map((device, index) => (
+                  <option
+                    key={device.deviceId || index}
+                    value={device.deviceId}
+                  >
+                    {device.label || `Audio Input ${index + 1}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-2 flex items-center justify-between font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#bbcabf]">
+                <span>Input Volume</span>
+                <span>{inputGain}%</span>
+              </span>
+              <input
+                className="h-1.5 w-full appearance-none rounded-full accent-[#4edea3]"
+                type="range"
+                min={0}
+                max={200}
+                value={inputGain}
+                onChange={(event) => setInputGain(Number(event.target.value))}
+              />
+            </label>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#bbcabf]">
+                <span>Level</span>
+                <span>{Math.round(inputLevelDb)}dB</span>
+              </div>
+              <div className="h-2 border border-[#3c4a42] bg-[#131316]">
+                <div
+                  className="h-full bg-[#4edea3]"
+                  style={{ width: `${inputLevel}%` }}
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => void handleGoLiveToggle()}
+              className="flex h-10 items-center justify-between border border-[#3c4a42] bg-[#131316] px-3 font-mono text-[10px] font-bold uppercase tracking-[0.1em] text-[#e4e1e6] transition hover:border-[#4edea3]"
+            >
+              <span>Go Live</span>
+              <StatusLed active={state.isLiveMode} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                lastAnalyzedTranscriptRef.current = "";
+                if (state.isAutoDisplayMode) {
+                  void stopListening();
+                  setIsAudioListening(false);
+                  setStatusMessage("Voice control (VOSK) stopped.");
+                } else {
+                  setStatusMessage("Starting voice control (VOSK)...");
+                  void startListening(
+                    "assets/vosk-models/vosk-model-small-en-us-0.15",
+                  );
+                  setIsAudioListening(true);
+                  setStatusMessage("Voice control (VOSK) is active.");
+                }
+                setIsAutoDisplayMode(!state.isAutoDisplayMode);
+              }}
+              className="flex h-10 items-center justify-between border border-[#3c4a42] bg-[#131316] px-3 font-mono text-[10px] font-bold uppercase tracking-[0.1em] text-[#e4e1e6] transition hover:border-[#4edea3]"
+            >
+              <span>Auto-Display Mode</span>
+              <span
+                className={joinClasses(
+                  "relative h-6 w-12 rounded-full",
+                  state.isAutoDisplayMode ? "bg-[#10b981]" : "bg-[#353438]",
+                )}
+              >
+                <span
+                  className={joinClasses(
+                    "absolute top-1 h-4 w-4 rounded-full bg-[#bbcabf] transition-transform",
+                    state.isAutoDisplayMode ? "left-7" : "left-1",
+                  )}
+                />
+              </span>
+            </button>
+
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                ["FULL", "Full Screen"],
+                ["LOWER_THIRD", "Lower Third"],
+              ].map(([format, label]) => (
+                <button
+                  key={format}
+                  type="button"
+                  onClick={() =>
+                    setDisplayFormat(format as "FULL" | "LOWER_THIRD")
+                  }
+                  className={joinClasses(
+                    "h-9 border px-2 font-mono text-[9px] font-bold uppercase tracking-[0.08em] transition",
+                    state.displayFormat === format
+                      ? "border-[#10b981] bg-[#10b981]/12 text-[#4edea3]"
+                      : "border-[#3c4a42] bg-[#131316] text-[#bbcabf] hover:border-[#4edea3]",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <div className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#bbcabf]">
+                  Scripture Lower Third
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {LOWER_THIRD_STYLES.map((style) => (
+                    <button
+                      key={`scripture-${style.value}`}
+                      type="button"
+                      onClick={() => {
+                        patchState({
+                          scriptureLowerThirdStyle: style.value,
+                          lowerThirdStyle: style.value,
+                        });
+                        setDisplayFormat("LOWER_THIRD");
+                        setStatusMessage(
+                          `Scripture style set to ${style.label}.`,
+                        );
+                      }}
+                      className={joinClasses(
+                        "h-8 border px-2 font-mono text-[9px] font-bold uppercase tracking-[0.06em] transition",
+                        state.scriptureLowerThirdStyle === style.value
+                          ? "border-[#10b981] bg-[#10b981]/12 text-[#4edea3]"
+                          : "border-[#3c4a42] bg-[#131316] text-[#bbcabf] hover:border-[#4edea3]",
+                      )}
+                    >
+                      {style.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#bbcabf]">
+                  Lyrics Lower Third
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {LOWER_THIRD_STYLES.map((style) => (
+                    <button
+                      key={`lyrics-${style.value}`}
+                      type="button"
+                      onClick={() => {
+                        patchState({
+                          lyricsLowerThirdStyle: style.value,
+                        });
+                        setStatusMessage(`Lyrics style set to ${style.label}.`);
+                      }}
+                      className={joinClasses(
+                        "h-8 border px-2 font-mono text-[9px] font-bold uppercase tracking-[0.06em] transition",
+                        state.lyricsLowerThirdStyle === style.value
+                          ? "border-[#10b981] bg-[#10b981]/12 text-[#4edea3]"
+                          : "border-[#3c4a42] bg-[#131316] text-[#bbcabf] hover:border-[#4edea3]",
+                      )}
+                    >
+                      {style.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="border border-[#3c4a42] bg-[#131316] p-2.5">
+              <div className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#bbcabf]">
+                Heard Audio
+              </div>
+              <p className="mt-2 min-h-8 text-xs leading-5 text-[#e4e1e6]">
+                {speechTranscript ||
+                  (isAudioListening ? "Listening..." : "Auto-display idle")}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setVerseHoldFlag(!state.verseHoldFlag)}
+              className={joinClasses(
+                "flex h-10 items-center justify-between border px-3 font-mono text-[10px] font-bold uppercase tracking-[0.1em] transition",
+                state.verseHoldFlag
+                  ? "border-[#ee9800] bg-[#131316] text-[#ffb95f]"
+                  : "border-[#3c4a42] bg-[#131316] text-[#ffb95f] hover:border-[#ee9800]",
+              )}
+            >
+              <span>Verse Lock (Hold V)</span>
+              <span className="border border-[#ffb95f] px-2 py-1 text-[10px]">
+                {state.verseHoldFlag ? "LOCK" : "OPEN"}
+              </span>
+            </button>
+
+            <div className="mt-auto border-t border-[#3c4a42] pt-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[#bbcabf]">
+              {statusMessage}
+            </div>
+          </div>
+        </section>
+
+        <div className="grid min-w-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(34rem,1fr)_17rem]">
+          <section className="min-w-0 overflow-y-auto bg-[#1b1b1e]">
+            <div className="grid gap-px p-px">
+              <div className="grid gap-px bg-[#3c4a42] xl:grid-cols-2">
+                <PreviewErrorBoundary>
+                  <ProjectionMonitor label="Operator Preview Screen" />
+                </PreviewErrorBoundary>
+                <ProjectionMonitor label="Live Display Output" active />
+              </div>
+
+              <section className="border border-[#3c4a42] bg-[#1f1f22] p-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="h-9 min-w-[5.5rem] border border-[#3c4a42] bg-[#353438] px-3 font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-[#e4e1e6] transition hover:border-[#bbcabf]"
+                  >
+                    Cut
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!state.isLiveMode) {
+                        void handleGoLiveToggle();
+                        return;
+                      }
+
+                      setStatusMessage("Live output is already active.");
+                    }}
+                    className="h-9 min-w-[6rem] border border-[#10b981] bg-[#10b981]/12 px-3 font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-[#4edea3] transition hover:bg-[#10b981] hover:text-[#003824]"
+                  >
+                    Take
+                  </button>
+                  <div className="hidden h-9 w-px bg-[#3c4a42] sm:block" />
+                  <label className="flex min-w-[14rem] flex-1 items-center gap-3">
+                    <span className="font-mono text-[10px] font-bold uppercase tracking-[0.1em] text-[#bbcabf]">
+                      Speed
+                    </span>
+                    <input
+                      className="h-1.5 flex-1 appearance-none rounded-full accent-[#e4e1e6]"
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={state.outputOpacity}
+                      onChange={(event) =>
+                        patchState({
+                          outputOpacity: Number(event.target.value),
+                        })
+                      }
+                    />
+                    <span className="font-mono text-sm font-bold text-[#4edea3]">
+                      {(state.outputOpacity / 100).toFixed(1)}s
+                    </span>
+                  </label>
+                </div>
+              </section>
+
+              <section className="border border-[#3c4a42] bg-[#1b1b1e] p-2.5">
+                <h2 className="mb-2 font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[#bbcabf]">
+                  Theme Background
+                </h2>
+                <div className="flex flex-col gap-2 border border-[#3c4a42] bg-[#131316] p-2.5 sm:flex-row sm:items-center">
+                  <button
+                    type="button"
+                    onClick={() => chooseTheme("IMAGE")}
+                    className="relative aspect-[16/9] w-full max-w-[10rem] overflow-hidden border border-[#3c4a42] bg-black"
+                  >
+                    <img
+                      alt="Current theme background"
+                      className="absolute inset-0 h-full w-full object-cover"
+                      src={abstractBackgroundUrl}
+                    />
+                  </button>
+                  <div className="flex flex-1 flex-wrap items-center gap-2">
+                    <div className="mr-auto">
+                      <div className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-[#bbcabf]">
+                        Current Active Theme
+                      </div>
+                      <div className="mt-1 font-mono text-[11px] uppercase text-[#4edea3]">
+                        {state.activeTheme.replace("_", " ")}
+                      </div>
+                    </div>
+                    {(
+                      ["IMAGE", "GREEN_SCREEN", "TRANSPARENT"] as ThemeType[]
+                    ).map((theme) => (
+                      <button
+                        key={theme}
+                        type="button"
+                        onClick={() => chooseTheme(theme)}
+                        className={joinClasses(
+                          "h-9 border px-3 font-mono text-[10px] font-bold uppercase tracking-[0.1em] transition",
+                          state.activeTheme === theme
+                            ? "border-[#10b981] bg-[#10b981]/12 text-[#4edea3]"
+                            : "border-[#3c4a42] bg-transparent text-[#bbcabf] hover:border-[#4edea3]",
+                        )}
+                      >
+                        {theme === "IMAGE"
+                          ? "Set For Bible"
+                          : theme.replace("_", " ")}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </section>
+
+              <section className="border border-[#3c4a42] bg-[#1b1b1e] p-2.5">
+                <div className="mb-2 grid gap-2 md:grid-cols-[minmax(12rem,18rem)_auto_1fr] md:items-center">
+                  <label className="block">
+                    <span className="sr-only">Translation</span>
+                    <select
+                      value={state.currentBibleTranslation}
+                      onChange={(event) =>
+                        handleTranslationChange(event.target.value)
+                      }
+                      className="h-9 w-full border border-[#3c4a42] bg-[#131316] px-3 font-mono text-[11px] text-[#e4e1e6] outline-none transition focus:border-[#4edea3]"
+                    >
+                      {availableTranslations.map((translation) => (
+                        <option key={translation} value={translation}>
+                          {translation}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void handleImportBible()}
+                    disabled={isImporting}
+                    className="h-9 border border-[#10b981] bg-[#10b981] px-3 font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-[#003824] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isImporting ? "Installing" : "Install Bible"}
+                  </button>
+                  <div className="truncate font-mono text-[10px] uppercase tracking-[0.12em] text-[#bbcabf]">
+                    Active Bible Translation
+                  </div>
+                </div>
+                <div className="flex h-10 items-center gap-2 border border-[#3c4a42] bg-[#131316] px-2.5">
+                  <span className="font-mono text-base text-[#bbcabf]">Q</span>
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    onKeyDown={handleSearchKeyDown}
+                    className="min-w-0 flex-1 bg-transparent text-sm text-[#e4e1e6] outline-none placeholder:text-[#bbcabf]"
+                    placeholder="Search verses or input text..."
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void runSearch()}
+                    disabled={isSearching}
+                    className="hidden h-8 border border-[#10b981] px-3 font-mono text-[10px] font-bold uppercase tracking-[0.1em] text-[#4edea3] transition hover:bg-[#10b981] hover:text-[#003824] disabled:opacity-60 sm:block"
+                  >
+                    {isSearching ? "Search..." : "Search"}
+                  </button>
+                </div>
+
+                <div className="mt-2 grid gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
+                  {[
+                    ["<<", "Previous Chapter", "PREVIOUS_CHAPTER"],
+                    ["<", "Previous Verse", "PREVIOUS_VERSE"],
+                    [">", "Next Verse", "NEXT_VERSE"],
+                    [">>", "Next Chapter", "NEXT_CHAPTER"],
+                  ].map(([symbol, label, direction]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() =>
+                        void handleNavigateScripture(
+                          direction as ScriptureNavigationDirection,
+                        )
+                      }
+                      className="h-11 border border-[#3c4a42] bg-[#131316] px-2 font-mono text-[9px] font-bold text-[#e4e1e6] transition hover:border-[#4edea3] hover:text-[#4edea3]"
+                    >
+                      <span className="block text-sm leading-none">
+                        {symbol}
+                      </span>
+                      <span className="mt-1 block uppercase tracking-[0.08em]">
+                        {label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="border border-[#3c4a42] bg-[#1b1b1e] p-4 xl:hidden">
+                <h2 className="mb-3 font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-[#bbcabf]">
+                  Output Routing
+                </h2>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {availableOutputs.map((output) => {
+                    const selected = state.selectedOutputIds.includes(
+                      output.id,
+                    );
+
+                    return (
+                      <button
+                        key={output.id}
+                        type="button"
+                        onClick={() => toggleOutputTarget(output.id)}
+                        className={joinClasses(
+                          "flex items-center justify-between border px-3 py-3 text-left transition",
+                          selected
+                            ? "border-[#10b981] bg-[#10b981]/12 text-[#4edea3]"
+                            : "border-[#3c4a42] bg-[#131316] text-[#e4e1e6] hover:border-[#4edea3]",
+                        )}
+                      >
+                        <span className="font-mono text-[11px] font-bold uppercase tracking-[0.12em]">
+                          {output.label}
+                        </span>
+                        <span className="text-[10px] uppercase text-[#bbcabf]">
+                          {output.kind}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <aside className="hidden min-w-0 border-l border-[#3c4a42] bg-[#1f1f22] xl:flex xl:flex-col">
+            <section className="flex min-h-0 flex-1 flex-col">
+              <div className="border-b border-[#3c4a42] bg-[#2a2a2d] px-4 py-3">
+                <h2 className="truncate font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-[#e4e1e6]">
+                  AI Real-Time Semantic Paraphrase Match
+                </h2>
+              </div>
+
+              <div className="space-y-3 p-4">
+                {semanticMatches.map((match, index) => (
+                  <button
+                    key={match.id}
+                    type="button"
+                    onClick={() => {
+                      if (match.record) {
+                        displayScriptureRecord(
+                          match.record,
+                          "Semantic match selected",
+                        );
+                      }
+                    }}
+                    className={joinClasses(
+                      "flex w-full items-center gap-3 border bg-[#131316] p-3 text-left transition",
+                      index === 0
+                        ? "border-[#10b981]"
+                        : "border-[#3c4a42] hover:border-[#4edea3]",
+                    )}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-mono text-[13px] text-[#e4e1e6]">
+                        {match.reference}
+                      </div>
+                      <div className="truncate text-sm text-[#bbcabf]">
+                        {match.text}
+                      </div>
+                    </div>
+                    <span
+                      className={joinClasses(
+                        "shrink-0 px-2 py-1 font-mono text-[11px] font-bold",
+                        index === 0
+                          ? "bg-[#10b981] text-[#003824]"
+                          : "bg-[#353438] text-[#bbcabf]",
+                      )}
+                    >
+                      {match.score}%
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="border-t border-[#3c4a42]">
+              <div className="border-b border-[#3c4a42] bg-[#2a2a2d] px-4 py-3">
+                <h2 className="font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-[#e4e1e6]">
+                  Output History Queue
+                </h2>
+              </div>
+              <div className="space-y-2 p-4 font-mono text-[12px] text-[#bbcabf]">
+                <div className="flex gap-4">
+                  <span>10:42:01</span>
+                  <span>[SYSTEM] Init OK</span>
+                </div>
+                <div className="flex gap-4">
+                  <span>10:45:12</span>
+                  <span className="text-[#4edea3]">
+                    [LIVE] {state.currentReferenceOutput || "Gen 1:1"}
+                  </span>
+                </div>
+                <div className="flex gap-4">
+                  <span>10:48:33</span>
+                  <span className="text-[#4edea3]">
+                    [LIVE] {selectedOutputCount} output
+                    {selectedOutputCount === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <div className="border-t border-[#3c4a42] pt-3 text-[#ffb95f]">
+                  {statusMessage}
+                </div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </div>
+    </main>
+  );
+}

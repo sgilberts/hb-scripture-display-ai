@@ -10,6 +10,9 @@
     "./index.tsx",
     "./src/**/*",
     "./components/**/*",
-    "./context/**/*"
+    "./context/**/*",
+    "./services/**/*",
+    "./speech/**/*",
+    "./core/**/*"
   ]
 }

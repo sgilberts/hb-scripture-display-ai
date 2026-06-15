@@ -8,6 +8,47 @@ import {
   type Dispatch,
   type ReactNode,
 } from "react";
+import { VoskSpeechService } from "../speech/VoskSpeechService";
+import { parseSpokenReference } from "../speech/IntentParser";
+import { detectVoiceCommand } from "../speech/VoiceCommandLayer";
+import { verseMemory } from "../speech/VerseMemory";
+import { detectFollowUp } from "../speech/FollowUpDetector";
+import { processSermonTranscript } from "../speech/SermonEngine";
+import { searchScriptureLocal } from "../speech/SemanticSearch";
+import { initializeVerseHighlightOverlay, highlightActiveVerse } from "../speech/VerseHighlightOverlay";
+
+// --- V2 ARCHITECTURE ---
+import { performanceGuard } from "../services/performance/VoicePerformanceGuard.v2";
+import { transcriptFilterStack } from "../services/intelligence/TranscriptFilterStack.v2";
+
+// --- V1 MULTILINGUAL CAPABILITIES ---
+import { languageDetection } from "../services/capabilities/languageDetection";
+import { translationBridge } from "../services/capabilities/translationBridge";
+import { scriptureMap } from "../services/capabilities/scriptureMap";
+import { offlineBibleSearch } from "../services/capabilities/offlineBibleSearch";
+import { voiceLearningEngine } from "../speech/VoiceLearningEngine";
+
+let lastFailedTranscript: string | null = null;
+let lastFailedTranscriptTime = 0;
+import { wakeWordCapability } from "../services/capabilities/wakeWord";
+import { contextMemory } from "../services/capabilities/contextMemory";
+import { sermonBuilder } from "../services/capabilities/sermonBuilder";
+
+// --- SCRIPTURE INTELLIGENCE ENGINE v1 ---
+import { scriptureContextMemory } from "../services/scripture/contextMemory";
+import { resolveFollowUp } from "../services/intent/followUpDetector";
+import { wakeWordDetector } from "../services/voice/wakeWordDetector";
+import { normalizeLanguage } from "../services/voice/languageNormalizer";
+
+// --- UPGRADED VOICE PIPELINE ---
+import { routeTranscript } from "../speech/CommandRouter";
+import { scriptureLockManager } from "../speech/ScriptureLockManager";
+import { verseContextManager } from "../speech/VerseContextManager";
+import {
+  detectSpokenTranslation,
+  resolveVoiceBiblePhrase,
+} from "../speech/VoiceScriptureResolver";
+
 import type {
   AudioScriptureAnalysis,
   AppStateMatrix,
@@ -19,7 +60,61 @@ import type {
   ScriptureNavigationDirection,
   ScriptureRecord,
   ThemeType,
+  ThemeDefinition,
 } from "../../shared/types";
+
+const DEFAULT_SCRIPTURE_THEMES: ThemeDefinition[] = [
+  {
+    id: "scripture-classic-default",
+    name: "Scripture Classic",
+    tabType: "SCRIPTURES",
+    lowerThirdStyle: "CLASSIC",
+    backgroundStyle: "IMAGE",
+    backgroundTexture: "NONE",
+    backgroundImagePath: "",
+    backgroundPositionX: 50,
+    backgroundPositionY: 50,
+    textPositionX: 50,
+    textPositionY: 78,
+    fillType: "Linear Gradient",
+    scale: 100,
+    entranceAnimation: "Slide Up",
+    animationDuration: 0.8,
+    animationCurve: "Ease-Out",
+  },
+  {
+    id: "scripture-minimal-default",
+    name: "Scripture Minimal",
+    tabType: "SCRIPTURES",
+    lowerThirdStyle: "MINIMAL",
+    backgroundStyle: "SOLID",
+    backgroundTexture: "NONE",
+    backgroundImagePath: "",
+    backgroundPositionX: 50,
+    backgroundPositionY: 50,
+    textPositionX: 50,
+    textPositionY: 72,
+    fillType: "Flat",
+    scale: 100,
+    entranceAnimation: "Fade In",
+    animationDuration: 0.6,
+    animationCurve: "Ease-Out",
+  },
+];
+
+function mergeDefaultScriptureThemes(
+  themes: ThemeDefinition[],
+): ThemeDefinition[] {
+  const nextThemes = [...themes];
+
+  for (const defaultTheme of DEFAULT_SCRIPTURE_THEMES) {
+    if (!nextThemes.some((theme) => theme.id === defaultTheme.id)) {
+      nextThemes.push(defaultTheme);
+    }
+  }
+
+  return nextThemes;
+}
 
 type AppStateAction =
   | { type: "SET_LIVE_MODE"; payload: boolean }
@@ -51,6 +146,7 @@ interface AppSettingsSnapshot {
   currentBibleTranslation?: string;
   selectedOutputIds?: string[];
   isAutoDisplayMode?: boolean;
+  isScriptureParaphraseMode?: boolean;
   displayFormat?: DisplayFormat;
   activeTheme?: ThemeType;
   selectedAudioDeviceId?: string;
@@ -67,6 +163,12 @@ interface AppSettingsSnapshot {
   backgroundPositionY?: number;
   textPositionX?: number;
   textPositionY?: number;
+  customThemes?: ThemeDefinition[];
+  defaultThemeId_SCRIPTURES?: string | null;
+  defaultThemeId_LYRICS?: string | null;
+  defaultThemeId_TIMER?: string | null;
+  previewInputId?: number | null;
+  outputRoutingMap?: Record<string, string | number>;
 }
 
 interface AppStateContextValue {
@@ -91,7 +193,7 @@ interface AppStateContextValue {
   patchState: (value: Partial<AppStateMatrix>) => void;
   resetState: () => void;
   refreshAvailableTranslations: () => Promise<string[]>;
-  refreshAvailableOutputs: () => Promise<OutputTarget[]>;
+  refreshAvailableOutputs: (overrideSelectedIds?: string[]) => Promise<OutputTarget[]>;
   triggerBibleImport: () => Promise<BibleImportResponse>;
   deleteTranslation: (
     translation: string,
@@ -105,11 +207,8 @@ interface AppStateContextValue {
     direction: ScriptureNavigationDirection,
     translation?: string,
   ) => Promise<ScriptureRecord | null>;
-  analyzeAudioScripture: (
-    audioData: ArrayBuffer,
-    mimeType: string,
-  ) => Promise<AudioScriptureAnalysis>;
-  hasAudioAiProvider?: () => Promise<boolean>;
+  startListening: (modelPath: string) => Promise<void>;
+  stopListening: () => Promise<void>;
   pickBackgroundImage: () => Promise<{
     canceled: boolean;
     path: string | null;
@@ -139,6 +238,10 @@ interface ElectronBridge {
   ) => Promise<{ deletedCount: number; translations: string[] }>;
   fetchAvailableTranslations: () => Promise<string[]>;
   fetchAvailableOutputs: () => Promise<OutputTarget[]>;
+  resolveVoskModelUrl: () => Promise<{
+    archivePath: string;
+    url: string;
+  }>;
   fetchAppSettings: () => Promise<AppSettingsSnapshot>;
   saveAppSettings: (
     settings: Record<string, unknown>,
@@ -159,6 +262,7 @@ const initialState: AppStateMatrix = {
   isLiveMode: false,
   verseHoldFlag: false,
   isAutoDisplayMode: false,
+  isScriptureParaphraseMode: false,
   displayFormat: "FULL",
   activeTheme: "IMAGE",
   currentBibleTranslation: "KJV",
@@ -179,6 +283,18 @@ const initialState: AppStateMatrix = {
   backgroundPositionY: 50,
   textPositionX: 50,
   textPositionY: 50,
+  customThemes: [...DEFAULT_SCRIPTURE_THEMES],
+  defaultThemeId_SCRIPTURES: DEFAULT_SCRIPTURE_THEMES[0].id,
+  defaultThemeId_LYRICS: null,
+  defaultThemeId_TIMER: null,
+  previewInputId: null,
+  outputInputId: null,
+  layerToCameraMap: {},
+  cameraThemeMap: {},
+  cameraMultiviews: {},
+  cameraInputs: [],
+  inputSettings: {},
+  outputRoutingMap: {},
 };
 
 const AppStateContext = createContext<AppStateContextValue | null>(null);
@@ -250,6 +366,7 @@ export function AppStateProvider({
   children: ReactNode;
   initialValue?: Partial<AppStateMatrix>;
 }): JSX.Element {
+  const [speechService] = useState(() => new VoskSpeechService());
   const [state, dispatch] = useReducer(appStateReducer, {
     ...initialState,
     ...initialValue,
@@ -264,6 +381,28 @@ export function AppStateProvider({
   const [isSettingsHydrated, setIsSettingsHydrated] = useState(false);
   const projectionWindow = isProjectionWindow();
   const persistedSettingsSignatureRef = useRef<string>("");
+  const currentBibleTranslationRef = useRef(state.currentBibleTranslation);
+  const availableTranslationsRef = useRef(availableTranslations);
+  const hasRefreshedTranslationsForVoiceRef = useRef(false);
+  const scriptureVoiceModesRef = useRef({
+    displayScriptures: state.isAutoDisplayMode,
+    paraphraseScriptures: state.isScriptureParaphraseMode,
+  });
+
+  useEffect(() => {
+    currentBibleTranslationRef.current = state.currentBibleTranslation;
+  }, [state.currentBibleTranslation]);
+
+  useEffect(() => {
+    availableTranslationsRef.current = availableTranslations;
+  }, [availableTranslations]);
+
+  useEffect(() => {
+    scriptureVoiceModesRef.current = {
+      displayScriptures: state.isAutoDisplayMode,
+      paraphraseScriptures: state.isScriptureParaphraseMode,
+    };
+  }, [state.isAutoDisplayMode, state.isScriptureParaphraseMode]);
 
   const refreshAvailableTranslations = async (
     preferredTranslation = state.currentBibleTranslation,
@@ -408,7 +547,16 @@ export function AppStateProvider({
 
     const response = await window.electron.searchBible(queryStr, translation);
 
-    return Array.isArray(response) ? (response as ScriptureRecord[]) : [];
+    const results = Array.isArray(response) ? (response as ScriptureRecord[]) : [];
+
+    if (results.length > 0 && lastFailedTranscript && Date.now() - lastFailedTranscriptTime < 15000) {
+      const r = results[0];
+      const refString = `${r.bookFull} ${r.chapter}:${r.verse}`;
+      voiceLearningEngine.recordCorrection(lastFailedTranscript, refString);
+      lastFailedTranscript = null;
+    }
+
+    return results;
   };
 
   const handleNavigateScripture = async (
@@ -423,19 +571,357 @@ export function AppStateProvider({
     return window.electron.navigateScripture(reference, translation, direction);
   };
 
-  const analyzeAudioScripture = async (
-    audioData: ArrayBuffer,
-    mimeType: string,
-  ): Promise<AudioScriptureAnalysis> => {
-    if (!window.electron?.analyzeAudioScripture) {
-      return {
-        transcript: "",
-        aiEnabled: false,
-        error: "Audio scripture analysis bridge is not available.",
-      };
-    }
+  const startListening = async (modelPath: string) => {
+    if (!performanceGuard.canStartListening()) return;
 
-    return window.electron.analyzeAudioScripture(audioData, mimeType);
+    console.log(
+      "[VOSK] Starting listening with modelPath:",
+      modelPath,
+    );
+    try {
+      await speechService.initialize(modelPath);
+      initializeVerseHighlightOverlay();
+      
+      let lastDispatchedText = "";
+      let lastDispatchedRef = "";
+      let lastDispatchTime = 0;
+      const sermonMode = true; // Optional structured mode
+      const displayVoiceScriptureResult = (
+        record: ScriptureRecord,
+        results: ScriptureRecord[],
+      ): boolean => {
+        const newText = record.text;
+        const newRef = `${record.bookFull} ${record.chapter}:${record.verse} ${record.translation}`;
+        const now = Date.now();
+
+        window.dispatchEvent(new CustomEvent("scriptureSearchResults", { detail: { results } }));
+
+        if ((lastDispatchedText === newText && lastDispatchedRef === newRef) || (now - lastDispatchTime <= 200)) {
+          return false;
+        }
+
+        lastDispatchedText = newText;
+        lastDispatchedRef = newRef;
+        lastDispatchTime = now;
+
+        if (!newText) {
+          console.log(`[DISPLAY FAIL] No text for ${newRef}`);
+          return false;
+        }
+
+        console.log(`[DISPLAY REQUEST] ${newRef}`);
+        dispatch({ type: "SET_CURRENT_TEXT_OUTPUT", payload: newText });
+        dispatch({ type: "SET_CURRENT_REFERENCE_OUTPUT", payload: newRef });
+        highlightActiveVerse(newRef);
+        window.dispatchEvent(new CustomEvent("scriptureHighlightEvent", {
+          detail: {
+            reference: newRef,
+            scrollTarget: `verse-${record.bookFull?.replace(/\s+/g, "-")}-${record.chapter}-${record.verse}`,
+          }
+        }));
+        console.log(`[DISPLAY SUCCESS] ${newRef}`);
+        return true;
+      };
+
+      // --- V1 MICRO-BATCHING GUARD ---
+      let microBatchTimer: ReturnType<typeof setTimeout> | null = null;
+      let pendingBatchText = "";
+      const flushMicroBatch = () => {
+        if (pendingBatchText) {
+          // Batched partial transcripts are available here for lightweight processing
+          pendingBatchText = "";
+        }
+        microBatchTimer = null;
+      };
+
+      await speechService.startListening(async (transcript) => {
+        const text = transcript.text;
+        console.log(`[VOICE RAW] ${text}`);
+        if (!text?.trim()) return;
+
+        // --- MICRO-BATCHING: Deduplicate bursting partials ---
+        if (!transcript.isFinal) {
+          pendingBatchText = text;
+          if (!microBatchTimer) {
+            microBatchTimer = setTimeout(flushMicroBatch, 75);
+          }
+        }
+
+        let translationDetection = detectSpokenTranslation(
+          text,
+          availableTranslationsRef.current,
+        );
+        if (
+          !translationDetection.translation &&
+          transcript.isFinal &&
+          !hasRefreshedTranslationsForVoiceRef.current
+        ) {
+          hasRefreshedTranslationsForVoiceRef.current = true;
+          try {
+            const refreshedTranslations = await refreshAvailableTranslations(
+              currentBibleTranslationRef.current,
+            );
+            availableTranslationsRef.current = refreshedTranslations;
+            translationDetection = detectSpokenTranslation(
+              text,
+              refreshedTranslations,
+            );
+          } catch (error) {
+            console.warn("[VOICE_TRANSLATION] Could not refresh installed translations", error);
+          }
+        }
+        const activeVoiceTranslation = translationDetection.translation ?? currentBibleTranslationRef.current;
+        if (translationDetection.translation && transcript.isFinal) {
+          console.log(`[VOICE_TRANSLATION] Switching scripture translation to ${translationDetection.translation}`);
+          currentBibleTranslationRef.current = translationDetection.translation;
+          dispatch({
+            type: "SET_CURRENT_BIBLE_TRANSLATION",
+            payload: translationDetection.translation,
+          });
+        }
+
+        // --- LANGUAGE NORMALIZER ---
+        const normalizedText = normalizeLanguage(translationDetection.cleanedTranscript || text);
+        console.log(`[NORMALIZED] ${normalizedText}`);
+        if (translationDetection.translation && transcript.isFinal && !normalizedText) {
+          return;
+        }
+
+        // --- WAKE WORD DETECTOR ---
+        wakeWordDetector.check(normalizedText);
+        wakeWordCapability.detect(text);
+        if (text.toLowerCase().includes("hallelujah mode")) {
+          console.log(`[WAKE_WORD] Activated: Hallelujah mode`);
+          window.dispatchEvent(new CustomEvent("wakeWordDetected", { detail: { phrase: "hallelujah mode" } }));
+        }
+
+        // --- MULTILINGUAL OVERLAY ---
+        const { language } = languageDetection.detect(text);
+        const translatedOutput = translationBridge.translate(text, language);
+        if (sermonMode && transcript.isFinal) {
+          sermonBuilder.buildFromStream(translatedOutput.translated, language);
+          const sermonOutput = processSermonTranscript(text);
+          if (sermonOutput) window.dispatchEvent(new CustomEvent("sermonModeOutput", { detail: sermonOutput }));
+        }
+
+        console.log(`[TRANSCRIPT] ${transcript.isFinal ? "Final" : "Partial"}:`, text);
+
+        // --- V2 TRANSCRIPT FILTER STACK ---
+        transcriptFilterStack.processRawStream(text, transcript.isFinal);
+
+        // ═══════════════════════════════════════════════════════════════
+        // COMMAND ROUTER — Priority: scripture → command → semantic
+        // ═══════════════════════════════════════════════════════════════
+        const routeResult = routeTranscript(
+          normalizedText,
+          transcript.isFinal,
+          transcript.confidence,
+        );
+        const voiceModes = scriptureVoiceModesRef.current;
+
+        // SUPPRESSED: inside scripture lock hold window, partial transcript, or non-reference text.
+        if (routeResult.type === "suppress") {
+          if (!voiceModes.paraphraseScriptures) return;
+          if (!transcript.isFinal || scriptureLockManager.isLocked()) return;
+
+          const phraseResolution = await resolveVoiceBiblePhrase(
+            normalizedText,
+            activeVoiceTranslation,
+            searchScriptures,
+          );
+          if (!phraseResolution?.results.length) return;
+
+          const r = phraseResolution.results[0];
+          const refString = `${r.bookFull} ${r.chapter}:${r.verse}`;
+          console.log(
+            `[VOICE_PHRASE] "${phraseResolution.query}" -> ${refString} ${phraseResolution.translation} (${phraseResolution.results.length} candidates)`,
+          );
+
+          contextMemory.recordInteraction(refString, language, "forward");
+          scriptureContextMemory.record(refString, normalizedText, "voice");
+          verseContextManager.setCurrentVerse(r.bookFull, r.chapter, r.verse);
+          verseMemory.updateVerseContext(r, "forward");
+          displayVoiceScriptureResult(r, phraseResolution.results);
+          return;
+        }
+
+        // ── A: SCRIPTURE REFERENCE DETECTED ─────────────────────────────
+        if (routeResult.type === "scripture" && routeResult.scriptureRef) {
+          if (!voiceModes.displayScriptures) {
+            scriptureLockManager.resetBuffer();
+            return;
+          }
+          const lockedRef = routeResult.scriptureRef;
+          console.log(`[PARSED REF] ${lockedRef}`);
+          transcript.parsedReference = lockedRef;
+
+          // Only do DB lookup on final — partials trigger early lock only
+          if (!transcript.isFinal) return;
+
+          // Use canonical ref as primary search key (skip full semantic)
+          console.log(`[LOOKUP REQUEST] ${lockedRef}`);
+          const results = await searchScriptures(
+            lockedRef,
+            activeVoiceTranslation
+          ).catch(() => []);
+
+          if (results.length > 0) {
+            console.log(`[LOOKUP RESULT] Success (${results.length} matches)`);
+            const r = results[0];
+            const refString = `${r.bookFull} ${r.chapter}:${r.verse}`;
+
+            // Update ALL context managers
+            verseContextManager.setCurrentVerse(r.bookFull, r.chapter, r.verse);
+            verseMemory.updateVerseContext(r, "forward");
+            scriptureContextMemory.record(refString, lockedRef, "voice");
+            contextMemory.recordInteraction(refString, language, "forward");
+            voiceLearningEngine.recordCorrection(normalizedText, refString);
+
+            // Reset scripture lock so next utterance is fresh
+            scriptureLockManager.resetBuffer();
+
+            window.dispatchEvent(new CustomEvent("scriptureSearchResults", { detail: { results } }));
+
+            const newText = r.text;
+            const newRef = `${r.bookFull} ${r.chapter}:${r.verse} ${r.translation}`;
+            const now = Date.now();
+
+            if ((lastDispatchedText !== newText || lastDispatchedRef !== newRef) && (now - lastDispatchTime > 200)) {
+              lastDispatchedText = newText;
+              lastDispatchedRef = newRef;
+              lastDispatchTime = now;
+
+              if (!newText) {
+                console.log(`[DISPLAY FAIL] No text for ${newRef}`);
+              } else {
+                console.log(`[DISPLAY REQUEST] ${newRef}`);
+                dispatch({ type: "SET_CURRENT_TEXT_OUTPUT", payload: newText });
+                dispatch({ type: "SET_CURRENT_REFERENCE_OUTPUT", payload: newRef });
+                highlightActiveVerse(newRef);
+                window.dispatchEvent(new CustomEvent("scriptureHighlightEvent", {
+                  detail: {
+                    reference: newRef,
+                    scrollTarget: `verse-${r.bookFull?.replace(/\s+/g, "-")}-${r.chapter}-${r.verse}`,
+                  }
+                }));
+                console.log(`[DISPLAY SUCCESS] ${newRef}`);
+              }
+            }
+          } else {
+            console.log(`[LOOKUP RESULT] Fail (No matches)`);
+            lastFailedTranscript = normalizedText;
+            lastFailedTranscriptTime = Date.now();
+          }
+
+          return;
+        }
+
+        // ── B: VOICE COMMAND ─────────────────────────────────────────────
+        if (routeResult.type === "command") {
+          // Navigation already handled inside CommandRouter (verseContextManager.next/previous)
+          // If a nav ref came back, look it up in DB
+          if (routeResult.navigationRef && transcript.isFinal) {
+            const navResults = await searchScriptures(
+              routeResult.navigationRef,
+              activeVoiceTranslation
+            ).catch(() => []);
+
+            if (navResults.length > 0) {
+              const r = navResults[0];
+              verseMemory.updateVerseContext(r, routeResult.command === "back" ? "back" : "forward");
+              const newText = r.text;
+              const newRef = `${r.bookFull} ${r.chapter}:${r.verse} ${r.translation}`;
+              const now = Date.now();
+              if ((lastDispatchedText !== newText || lastDispatchedRef !== newRef) && (now - lastDispatchTime > 200)) {
+                lastDispatchedText = newText;
+                lastDispatchedRef = newRef;
+                lastDispatchTime = now;
+                if (!newText) {
+                  console.log(`[DISPLAY FAIL] No text for ${newRef}`);
+                } else {
+                  console.log(`[DISPLAY REQUEST] ${newRef}`);
+                  dispatch({ type: "SET_CURRENT_TEXT_OUTPUT", payload: newText });
+                  dispatch({ type: "SET_CURRENT_REFERENCE_OUTPUT", payload: newRef });
+                  highlightActiveVerse(newRef);
+                  console.log(`[DISPLAY SUCCESS] ${newRef}`);
+                }
+              }
+            }
+          }
+          return;
+        }
+
+        // ── C: SEMANTIC SEARCH FALLBACK (only for non-scripture text) ─────
+        if (routeResult.type === "semantic" && transcript.isFinal) {
+          if (!voiceModes.paraphraseScriptures) return;
+
+          // Follow-up detector (legacy)
+          const followUpIntent = detectFollowUp(text);
+          if (followUpIntent) {
+            window.dispatchEvent(new CustomEvent("followUpDetected", { detail: { intent: followUpIntent } }));
+          }
+
+          // V1 follow-up resolver
+          const followUpResolution = resolveFollowUp(normalizedText);
+          if (followUpResolution?.resolvedReference) {
+            console.log(`[FOLLOW_UP] Resolved to: ${followUpResolution.resolvedReference}`);
+          }
+
+          // Map + capabilities search
+          const mapped = scriptureMap.mapReference(translatedOutput.translated);
+          const searchTarget = mapped?.canonicalReference || translatedOutput.translated || text;
+
+          const results = await offlineBibleSearch.semanticSearch(
+            searchTarget,
+            translatedOutput.translated,
+            activeVoiceTranslation,
+            searchScriptures
+          );
+
+          if (results.length > 0) {
+            const r = results[0];
+            const refString = `${r.bookFull} ${r.chapter}:${r.verse}`;
+            contextMemory.recordInteraction(refString, language, "forward");
+            scriptureContextMemory.record(refString, normalizedText, "voice");
+            verseContextManager.setCurrentVerse(r.bookFull, r.chapter, r.verse);
+            verseMemory.updateVerseContext(r, "forward");
+
+            window.dispatchEvent(new CustomEvent("scriptureSearchResults", { detail: { results } }));
+
+            const newText = r.text;
+            const newRef = `${r.bookFull} ${r.chapter}:${r.verse} ${r.translation}`;
+            const now = Date.now();
+            if ((lastDispatchedText !== newText || lastDispatchedRef !== newRef) && (now - lastDispatchTime > 200)) {
+              lastDispatchedText = newText;
+              lastDispatchedRef = newRef;
+              lastDispatchTime = now;
+              dispatch({ type: "SET_CURRENT_TEXT_OUTPUT", payload: newText });
+              dispatch({ type: "SET_CURRENT_REFERENCE_OUTPUT", payload: newRef });
+              highlightActiveVerse(newRef);
+              window.dispatchEvent(new CustomEvent("scriptureHighlightEvent", {
+                detail: {
+                  reference: newRef,
+                  scrollTarget: `verse-${r.bookFull?.replace(/\s+/g, "-")}-${r.chapter}-${r.verse}`,
+                }
+              }));
+            }
+          }
+        }
+      });
+      console.log("[VOSK] Listening started successfully");
+    } catch (err) {
+      performanceGuard.markStopped();
+      console.error("[VOSK] Failed to start listening:", err);
+    }
+  };
+
+  const stopListening = async () => {
+    try {
+      await speechService.stopListening();
+      performanceGuard.markStopped();
+    } catch (err) {
+      console.error("[VOSK] Error stopping:", err);
+    }
   };
 
   useEffect(() => {
@@ -451,6 +937,7 @@ export function AppStateProvider({
       isLiveMode: state.isLiveMode,
       verseHoldFlag: state.verseHoldFlag,
       isAutoDisplayMode: state.isAutoDisplayMode,
+      isScriptureParaphraseMode: state.isScriptureParaphraseMode,
       currentBibleTranslation: state.currentBibleTranslation,
       selectedOutputIds: state.selectedOutputIds,
       selectedAudioDeviceId: state.selectedAudioDeviceId,
@@ -467,6 +954,19 @@ export function AppStateProvider({
       backgroundPositionY: state.backgroundPositionY,
       textPositionX: state.textPositionX,
       textPositionY: state.textPositionY,
+      customThemes: state.customThemes,
+      defaultThemeId_SCRIPTURES: state.defaultThemeId_SCRIPTURES,
+      defaultThemeId_LYRICS: state.defaultThemeId_LYRICS,
+      defaultThemeId_TIMER: state.defaultThemeId_TIMER,
+      previewInputId: state.previewInputId,
+      outputInputId: state.outputInputId,
+      layerToCameraMap: state.layerToCameraMap,
+      cameraThemeMap: state.cameraThemeMap,
+      cameraMultiviews: state.cameraMultiviews,
+      cameraInputs: state.cameraInputs,
+      inputSettings: state.inputSettings,
+      videoPlaybackState: state.videoPlaybackState,
+      outputRoutingMap: state.outputRoutingMap,
     });
   }, [
     state.activeTheme,
@@ -476,6 +976,7 @@ export function AppStateProvider({
     state.isLiveMode,
     state.verseHoldFlag,
     state.isAutoDisplayMode,
+    state.isScriptureParaphraseMode,
     state.currentBibleTranslation,
     state.selectedOutputIds,
     state.selectedAudioDeviceId,
@@ -492,6 +993,19 @@ export function AppStateProvider({
     state.backgroundPositionY,
     state.textPositionX,
     state.textPositionY,
+    state.customThemes,
+    state.defaultThemeId_SCRIPTURES,
+    state.defaultThemeId_LYRICS,
+    state.defaultThemeId_TIMER,
+    state.previewInputId,
+    state.outputInputId,
+    state.layerToCameraMap,
+    state.cameraThemeMap,
+    state.cameraMultiviews,
+    state.cameraInputs,
+    state.inputSettings,
+    state.videoPlaybackState,
+    state.outputRoutingMap,
   ]);
 
   useEffect(() => {
@@ -516,10 +1030,11 @@ export function AppStateProvider({
       return;
     }
 
-    const load = async (): Promise<void> => {
+  const load = async (): Promise<void> => {
       let nextTranslation = state.currentBibleTranslation;
       let nextSelectedOutputIds = state.selectedOutputIds;
       let nextAutoDisplayMode = state.isAutoDisplayMode;
+      let nextScriptureParaphraseMode = state.isScriptureParaphraseMode;
       let nextDisplayFormat = state.displayFormat;
       let nextActiveTheme = state.activeTheme;
       let nextSelectedAudioDeviceId = state.selectedAudioDeviceId;
@@ -536,6 +1051,10 @@ export function AppStateProvider({
       let nextBackgroundPositionY = state.backgroundPositionY;
       let nextTextPositionX = state.textPositionX;
       let nextTextPositionY = state.textPositionY;
+      let nextCustomThemes = state.customThemes;
+      let nextDefaultThemeIdScriptures = state.defaultThemeId_SCRIPTURES;
+      let nextDefaultThemeIdLyrics = state.defaultThemeId_LYRICS;
+      let nextDefaultThemeIdTimer = state.defaultThemeId_TIMER;
 
       try {
         const storedSettings =
@@ -560,6 +1079,11 @@ export function AppStateProvider({
             typeof storedSettings.isAutoDisplayMode === "boolean"
               ? storedSettings.isAutoDisplayMode
               : state.isAutoDisplayMode;
+
+          nextScriptureParaphraseMode =
+            typeof storedSettings.isScriptureParaphraseMode === "boolean"
+              ? storedSettings.isScriptureParaphraseMode
+              : state.isScriptureParaphraseMode;
 
           nextDisplayFormat =
             storedSettings.displayFormat === "LOWER_THIRD"
@@ -657,6 +1181,47 @@ export function AppStateProvider({
               ? storedSettings.textPositionY
               : state.textPositionY;
 
+          nextCustomThemes = mergeDefaultScriptureThemes(
+            Array.isArray(storedSettings.customThemes)
+              ? (storedSettings.customThemes as ThemeDefinition[])
+              : state.customThemes,
+          );
+
+          const scriptureThemeIds = new Set(
+            nextCustomThemes
+              .filter((theme) => theme.tabType === "SCRIPTURES")
+              .map((theme) => theme.id),
+          );
+          const lyricsThemeIds = new Set(
+            nextCustomThemes
+              .filter((theme) => theme.tabType === "LYRICS")
+              .map((theme) => theme.id),
+          );
+          const timerThemeIds = new Set(
+            nextCustomThemes
+              .filter((theme) => theme.tabType === "TIMER")
+              .map((theme) => theme.id),
+          );
+
+          nextDefaultThemeIdScriptures =
+            typeof storedSettings.defaultThemeId_SCRIPTURES === "string" &&
+            scriptureThemeIds.has(storedSettings.defaultThemeId_SCRIPTURES)
+              ? storedSettings.defaultThemeId_SCRIPTURES
+              : nextCustomThemes.find((theme) => theme.tabType === "SCRIPTURES")
+                ?.id ?? DEFAULT_SCRIPTURE_THEMES[0].id;
+
+          nextDefaultThemeIdLyrics =
+            typeof storedSettings.defaultThemeId_LYRICS === "string" &&
+            lyricsThemeIds.has(storedSettings.defaultThemeId_LYRICS)
+              ? storedSettings.defaultThemeId_LYRICS
+              : state.defaultThemeId_LYRICS;
+
+          nextDefaultThemeIdTimer =
+            typeof storedSettings.defaultThemeId_TIMER === "string" &&
+            timerThemeIds.has(storedSettings.defaultThemeId_TIMER)
+              ? storedSettings.defaultThemeId_TIMER
+              : state.defaultThemeId_TIMER;
+
           dispatch({
             type: "SET_CURRENT_BIBLE_TRANSLATION",
             payload: nextTranslation,
@@ -711,6 +1276,7 @@ export function AppStateProvider({
             type: "PATCH_STATE",
             payload: {
               scriptureLowerThirdStyle: nextScriptureLowerThirdStyle,
+              isScriptureParaphraseMode: nextScriptureParaphraseMode,
               lyricsLowerThirdStyle: nextLyricsLowerThirdStyle,
               backgroundStyle: nextBackgroundStyle,
               backgroundTexture: nextBackgroundTexture,
@@ -719,6 +1285,15 @@ export function AppStateProvider({
               backgroundPositionY: nextBackgroundPositionY,
               textPositionX: nextTextPositionX,
               textPositionY: nextTextPositionY,
+              customThemes: nextCustomThemes,
+              defaultThemeId_SCRIPTURES: nextDefaultThemeIdScriptures,
+              defaultThemeId_LYRICS: nextDefaultThemeIdLyrics,
+              defaultThemeId_TIMER: nextDefaultThemeIdTimer,
+              outputRoutingMap:
+                storedSettings.outputRoutingMap &&
+                typeof storedSettings.outputRoutingMap === "object"
+                  ? (storedSettings.outputRoutingMap as Record<string, string | number>)
+                  : state.outputRoutingMap,
             },
           });
 
@@ -726,6 +1301,7 @@ export function AppStateProvider({
             currentBibleTranslation: nextTranslation,
             selectedOutputIds: nextSelectedOutputIds,
             isAutoDisplayMode: nextAutoDisplayMode,
+            isScriptureParaphraseMode: nextScriptureParaphraseMode,
             displayFormat: nextDisplayFormat,
             activeTheme: nextActiveTheme,
             selectedAudioDeviceId: nextSelectedAudioDeviceId,
@@ -742,7 +1318,20 @@ export function AppStateProvider({
             backgroundPositionY: nextBackgroundPositionY,
             textPositionX: nextTextPositionX,
             textPositionY: nextTextPositionY,
+            customThemes: nextCustomThemes,
+            defaultThemeId_SCRIPTURES: nextDefaultThemeIdScriptures,
+            defaultThemeId_LYRICS: nextDefaultThemeIdLyrics,
+            defaultThemeId_TIMER: nextDefaultThemeIdTimer,
           });
+
+          if (window.electron?.saveAppSettings) {
+            void window.electron.saveAppSettings({
+              customThemes: nextCustomThemes,
+              defaultThemeId_SCRIPTURES: nextDefaultThemeIdScriptures,
+              defaultThemeId_LYRICS: nextDefaultThemeIdLyrics,
+              defaultThemeId_TIMER: nextDefaultThemeIdTimer,
+            });
+          }
         }
       } finally {
         setIsSettingsHydrated(true);
@@ -767,6 +1356,7 @@ export function AppStateProvider({
       currentBibleTranslation: state.currentBibleTranslation,
       selectedOutputIds: state.selectedOutputIds,
       isAutoDisplayMode: state.isAutoDisplayMode,
+      isScriptureParaphraseMode: state.isScriptureParaphraseMode,
       displayFormat: state.displayFormat,
       activeTheme: state.activeTheme,
       selectedAudioDeviceId: state.selectedAudioDeviceId,
@@ -783,6 +1373,11 @@ export function AppStateProvider({
       backgroundPositionY: state.backgroundPositionY,
       textPositionX: state.textPositionX,
       textPositionY: state.textPositionY,
+      customThemes: state.customThemes,
+      defaultThemeId_SCRIPTURES: state.defaultThemeId_SCRIPTURES,
+      defaultThemeId_LYRICS: state.defaultThemeId_LYRICS,
+      defaultThemeId_TIMER: state.defaultThemeId_TIMER,
+      outputRoutingMap: state.outputRoutingMap,
     };
     const nextSignature = JSON.stringify(nextSnapshot);
 
@@ -798,6 +1393,7 @@ export function AppStateProvider({
     state.currentBibleTranslation,
     state.selectedOutputIds,
     state.isAutoDisplayMode,
+    state.isScriptureParaphraseMode,
     state.displayFormat,
     state.activeTheme,
     state.selectedAudioDeviceId,
@@ -814,6 +1410,11 @@ export function AppStateProvider({
     state.backgroundPositionY,
     state.textPositionX,
     state.textPositionY,
+    state.customThemes,
+    state.defaultThemeId_SCRIPTURES,
+    state.defaultThemeId_LYRICS,
+    state.defaultThemeId_TIMER,
+    state.outputRoutingMap,
   ]);
 
   const contextValue: AppStateContextValue = {
@@ -857,7 +1458,8 @@ export function AppStateProvider({
     deleteTranslation,
     searchScriptures,
     navigateScripture: handleNavigateScripture,
-    analyzeAudioScripture,
+    startListening,
+    stopListening,
   };
 
   return (

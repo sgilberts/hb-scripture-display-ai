@@ -8,13 +8,12 @@
 :root {
   color-scheme: dark;
   font-family: "Inter", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
-  background: #0e0e11;
   color: #e4e1e6;
 }
 
 body {
   margin: 0;
-  background: #0e0e11;
+  background: transparent;
   color: #e4e1e6;
   font-family: "Inter", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
@@ -50,3 +49,68 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #86948a;
 }
+
+.scanline {
+  background: linear-gradient(to bottom, transparent 50%, rgba(0, 0, 0, 0.25) 51%);
+  background-size: 100% 4px;
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(16,185,129,0.4); }
+  50% { box-shadow: 0 0 50px rgba(16,185,129,0.8); }
+}
+
+@keyframes trace-flow {
+  0% { stroke-dashoffset: 1000; }
+  100% { stroke-dashoffset: 0; }
+}
+
+/* Neon scan line that sweeps left-to-right across the header border */
+@keyframes neon-scan {
+  0% { left: -20%; opacity: 0; }
+  10% { opacity: 1; }
+  40% { opacity: 1; }
+  50% { left: 120%; opacity: 0; }
+  100% { left: 120%; opacity: 0; }
+}
+
+.neon-scan-line {
+  position: absolute;
+  bottom: -1px;
+  width: 15%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, #10b981 15%, #4edea3 50%, #10b981 85%, transparent 100%);
+  box-shadow: 0 0 10px 3px rgba(16,185,129,0.7), 0 0 25px 6px rgba(16,185,129,0.35), 0 0 4px 1px rgba(78,222,163,0.9);
+  border-radius: 1px;
+  pointer-events: none;
+  opacity: 0;
+  /* 10s total duration. Sweeps in the first 50% (5s), then waits for 5s (50%-100%) */
+  animation: neon-scan 10s ease-in-out infinite;
+}
+
+/* Neon circuit traces inside the splash modal — horizontal */
+@keyframes circuit-trace-h {
+  0% { left: -30%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { left: 130%; opacity: 0; }
+}
+
+/* Neon circuit traces inside the splash modal — vertical */
+@keyframes circuit-trace-v {
+  0% { top: -30%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 130%; opacity: 0; }
+}
+
+@keyframes circuit-node-pulse {
+  0%, 100% { box-shadow: 0 0 3px rgba(16,185,129,0.4); opacity: 0.4; transform: scale(1); }
+  50% { box-shadow: 0 0 14px rgba(16,185,129,1); opacity: 1; transform: scale(1.3); }
+}
+
+
