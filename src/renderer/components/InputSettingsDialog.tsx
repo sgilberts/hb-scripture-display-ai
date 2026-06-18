@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AppStateMatrix, InputSetting } from '../../shared/types';
+import NetworkStreamView from './NetworkStreamView';
 
 export interface InputSettingsDialogProps {
     sid: number;
@@ -33,6 +34,11 @@ function joinClasses(
 
 function extendedElectron() {
   return window.electron as any;
+}
+
+function inputTypeForNetworkStream(stream: any): string {
+  const protocol = String(stream.protocol || '').toUpperCase();
+  return protocol === 'USB' ? 'Camera' : protocol;
 }
 
 const SliderRow = ({
@@ -133,6 +139,25 @@ export default function InputSettingsDialog({
     const tabs = ["General", "Colour Adjust", "Chroma Key", "MultiView", "Position", "Triggers", "Tally Light", "Advanced", "NDI / OMT / Desktop Capture"];
     if (currentType === "Image") tabs.splice(1, 0, "Image");
     if (currentType === "Video") tabs.splice(1, 0, "Video");
+
+    const [streams, setStreams] = useState<any[]>([]);
+
+    useEffect(() => {
+        const api = extendedElectron();
+        let cleanup: (() => void) | undefined;
+        
+        if (api.getNetworkStreams) {
+            api.getNetworkStreams().then(setStreams).catch(console.error);
+        }
+        if (api.onNetworkStreamsUpdated) {
+            cleanup = api.onNetworkStreamsUpdated((s: any[]) => setStreams(s));
+        }
+        
+        return () => {
+            if (cleanup) cleanup();
+        };
+    }, []);
+
     const sliderClass = "w-full h-1.5 bg-[#353438] rounded accent-[#4edea3] appearance-none cursor-pointer";
     const labelClass = "font-mono text-[8px] text-[#bbcabf] uppercase tracking-wider";
     const fieldRowClass = "flex items-center gap-2 mb-2";
@@ -181,17 +206,6 @@ export default function InputSettingsDialog({
     );
 
     const NDITabContent = () => {
-        const [streams, setStreams] = useState<any[]>([]);
-
-        useEffect(() => {
-            const api = extendedElectron();
-            if (api.getNetworkStreams) {
-                api.getNetworkStreams().then(setStreams).catch(console.error);
-            }
-            if (api.onNetworkStreamsUpdated) {
-                return api.onNetworkStreamsUpdated((s: any[]) => setStreams(s));
-            }
-        }, []);
         return (
             <div className="flex flex-col h-full bg-[#131316] text-[#e4e1e6] w-full" onClick={(e) => e.stopPropagation()}>
                 {/* Top Action Bar */}
@@ -241,28 +255,34 @@ export default function InputSettingsDialog({
                             ) : streams.map((stream, idx) => (
                                 <div key={stream.id} className="flex flex-col items-center group">
                                     <div className="w-full aspect-video bg-[#0d0d0f] relative border border-[#3c4a42] shadow-sm flex items-center justify-center overflow-hidden hover:border-[#4edea3] transition-colors cursor-pointer">
-                                        <ColorBars />
+                                        <NetworkStreamView
+                                            streamId={stream.id}
+                                            className="absolute inset-0"
+                                            muted
+                                        />
                                         <div className="absolute bottom-0 left-0 bg-[#1f1f22] text-[#4edea3] text-[9px] font-bold px-1.5 py-0.5 z-10 border-t border-r border-[#3c4a42]">{stream.protocol}</div>
                                         {/* Save overlay on hover */}
                                         <button
                                             className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 text-[#4edea3] text-[9px] font-bold"
                                             onClick={() => {
+                                                updateInputSetting(sid, 'name', stream.name);
+                                                updateInputSetting(sid, 'type', inputTypeForNetworkStream(stream));
+                                                updateInputSetting(sid, 'mediaPath', stream.id);
                                                 setCameraInputs((prev: any[]) => {
-                                                    const exists = prev.find((c: any) => c.networkStreamId === stream.id);
-                                                    if (exists) return prev;
-                                                    const nextId = Math.max(0, ...prev.map((c: any) => c.id)) + 1;
-                                                    return [...prev, {
-                                                        id: nextId,
+                                                    return prev.map((c: any) => c.id === sid ? {
+                                                        ...c,
                                                         name: stream.name,
-                                                        live: false,
-                                                        type: stream.protocol === 'USB' ? 'Camera' : 'NDI',
+                                                        type: inputTypeForNetworkStream(stream),
+                                                        mediaPath: stream.id,
                                                         networkStreamId: stream.id,
-                                                    }];
+                                                        networkProtocol: stream.protocol,
+                                                        networkStreamIp: stream.ip,
+                                                    } : c);
                                                 });
                                             }}
                                         >
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                                            SAVE AS INPUT
+                                            USE FOR THIS INPUT
                                         </button>
                                     </div>
                                     <span className="text-[10px] mt-1 text-[#bbcabf] font-mono truncate w-full text-center">{stream.name}</span>
@@ -345,16 +365,47 @@ export default function InputSettingsDialog({
                                             className={inputClass} 
                                             value={s.mediaPath || cameraInputs.find(c => c.id === sid)?.mediaPath || ""} 
                                             onChange={e => {
-                                                updateInputSetting(sid, 'mediaPath', e.target.value);
-                                                setCameraInputs(prev => prev.map(c => c.id === sid ? { ...c, mediaPath: e.target.value } : c));
+                                                const val = e.target.value;
+                                                const stream = streams.find(s => s.id === val);
+                                                updateInputSetting(sid, 'mediaPath', val);
+                                                if (stream) {
+                                                    setCameraInputs(prev => prev.map(c => c.id === sid ? {
+                                                        ...c,
+                                                        mediaPath: val,
+                                                        type: inputTypeForNetworkStream(stream),
+                                                        networkStreamId: stream.id,
+                                                        networkProtocol: stream.protocol,
+                                                        networkStreamIp: stream.ip,
+                                                    } : c));
+                                                } else {
+                                                    setCameraInputs(prev => prev.map(c => c.id === sid ? { ...c, mediaPath: val } : c));
+                                                }
                                             }}
                                         >
                                             <option value="">Select Camera...</option>
-                                            {videoDevices.map((device: any) => (
-                                                <option key={device.deviceId} value={device.deviceId}>
-                                                    {device.label || `Camera ${device.deviceId.slice(0, 5)}`}
-                                                </option>
-                                            ))}
+                                            <optgroup label="Network Streams">
+                                                {streams.map((stream: any) => (
+                                                    <option key={`stream-${stream.id}`} value={stream.id}>
+                                                        {stream.name || `${stream.protocol} Stream`} ({stream.protocol})
+                                                    </option>
+                                                ))}
+                                            </optgroup>
+                                            <optgroup label="Saved Inputs">
+                                                {cameraInputs
+                                                    .filter((input: any) => input.networkProtocol === 'USB' || (input.type === 'Camera' && String(input.networkStreamId || '').startsWith('usb')) )
+                                                    .map((input: any) => (
+                                                    <option key={`saved-${input.networkStreamId || input.id}`} value={input.networkStreamId || input.mediaPath || ''}>
+                                                        {input.name}
+                                                    </option>
+                                                ))}
+                                            </optgroup>
+                                            <optgroup label="Local Devices">
+                                                {videoDevices.map((device: any) => (
+                                                    <option key={`device-${device.deviceId}`} value={device.deviceId}>
+                                                        {device.label || `Camera ${device.deviceId.slice(0, 5)}`}
+                                                    </option>
+                                                ))}
+                                            </optgroup>
                                         </select>
                                     ) : (
                                         <select 

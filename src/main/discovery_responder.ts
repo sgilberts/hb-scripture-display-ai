@@ -10,6 +10,8 @@ import {
 } from "./network_constants";
 
 let socket: dgram.Socket | null = null;
+let activePorts = { ...NETWORK_PORTS };
+let activeIpRange = "";
 
 function ipToNumber(ip: string): number | null {
   const parts = ip.split(".").map((part) => Number.parseInt(part, 10));
@@ -20,9 +22,30 @@ function ipToNumber(ip: string): number | null {
   return parts.reduce((value, part) => ((value << 8) + part) >>> 0, 0);
 }
 
-function findReachableAddress(remoteAddress: string): string {
+function addressMatchesRange(address: string, range: string): boolean {
+  const trimmed = range.trim();
+  if (!trimmed) return true;
+  if (trimmed.endsWith(".*")) {
+    return address.startsWith(trimmed.slice(0, -1));
+  }
+  if (trimmed.includes("/")) {
+    const [base, bitsRaw] = trimmed.split("/");
+    const bits = Number.parseInt(bitsRaw, 10);
+    const ip = ipToNumber(address);
+    const baseIp = ipToNumber(base);
+    if (ip === null || baseIp === null || !Number.isInteger(bits) || bits < 0 || bits > 32) {
+      return false;
+    }
+    const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+    return (ip & mask) === (baseIp & mask);
+  }
+  return address.startsWith(trimmed);
+}
+
+function findReachableAddress(remoteAddress: string, ipRange = ""): string {
   const remote = ipToNumber(remoteAddress);
   const fallback: string[] = [];
+  const rangeFallback: string[] = [];
 
   for (const addresses of Object.values(os.networkInterfaces())) {
     for (const address of addresses ?? []) {
@@ -31,6 +54,9 @@ function findReachableAddress(remoteAddress: string): string {
       }
 
       fallback.push(address.address);
+      if (addressMatchesRange(address.address, ipRange)) {
+        rangeFallback.push(address.address);
+      }
       const local = ipToNumber(address.address);
       const mask = ipToNumber(address.netmask);
       if (remote !== null && local !== null && mask !== null && (remote & mask) === (local & mask)) {
@@ -39,11 +65,11 @@ function findReachableAddress(remoteAddress: string): string {
     }
   }
 
-  return fallback[0] ?? NETWORK_BIND_ADDRESS;
+  return rangeFallback[0] ?? fallback[0] ?? NETWORK_BIND_ADDRESS;
 }
 
 function buildAnnouncement(remoteAddress: string): Buffer {
-  const ipAddress = findReachableAddress(remoteAddress);
+  const ipAddress = findReachableAddress(remoteAddress, activeIpRange);
 
   return Buffer.from(
     JSON.stringify({
@@ -53,7 +79,8 @@ function buildAnnouncement(remoteAddress: string): Buffer {
       ip: ipAddress,
       ipAddress,
       services: HALLELUJAHBEAMER_SERVICES,
-      ports: NETWORK_PORTS,
+      ports: activePorts,
+      ipRange: activeIpRange,
       timestamp: new Date().toISOString(),
     }),
     "utf8",
@@ -74,11 +101,17 @@ function isDiscoveryProbe(message: Buffer): boolean {
   }
 }
 
-export function startDiscoveryResponder(port: number = CONTROL_PORT): void {
+export function startDiscoveryResponder(
+  port: number = CONTROL_PORT,
+  ports = NETWORK_PORTS,
+  ipRange = "",
+): void {
   if (socket) {
     return;
   }
 
+  activePorts = { ...ports };
+  activeIpRange = ipRange.trim();
   socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
 
   socket.on("message", (message, remote) => {

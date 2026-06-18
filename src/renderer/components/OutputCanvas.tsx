@@ -3,6 +3,7 @@ import { useAppState } from "../context/AppState";
 import { ThemeDefinition, LowerThirdStyle, ScriptureRecord, BackgroundStyle, CameraInput } from "../../shared/types";
 import CanvasRenderer from "./CanvasRenderer";
 import { LiveCamera } from "./LiveCamera";
+import NetworkStreamView from "./NetworkStreamView";
 import MediaChromaWrapper from "./MediaChromaWrapper";
 import { hexToRgb, type ChromaKeySettings } from "../core/chromaKeyEngine";
 
@@ -252,6 +253,18 @@ export default function OutputCanvas({
             forceTransparentBg={isTransparentTheme}
           />
         </div>
+      );
+    } else if (
+      (effectiveType === "OMT" || effectiveType === "NDI" || (cam as any).networkStreamId) &&
+      ((cam as any).networkStreamId || effectiveMediaPath)
+    ) {
+      mediaContent = (
+        <NetworkStreamView
+          streamId={(cam as any).networkStreamId || effectiveMediaPath}
+          className="h-full w-full"
+          muted={compact || (state.audioMutedState?.[cam.id] ?? true)}
+          inputId={cam.id}
+        />
       );
     } else if (effectiveType === "Camera" && effectiveMediaPath) {
       mediaContent = (

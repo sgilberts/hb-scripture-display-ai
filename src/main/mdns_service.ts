@@ -27,7 +27,11 @@ export function setMdnsUpdateCallback(cb: () => void) {
   updateCallback = cb;
 }
 
-export function startMdnsService(port: number = OMT_PORT) {
+export function startMdnsService(
+  port: number = OMT_PORT,
+  ports = NETWORK_PORTS,
+  ipRange = '',
+) {
   if (bonjourInstance) {
     return;
   }
@@ -47,10 +51,11 @@ export function startMdnsService(port: number = OMT_PORT) {
         device: 'Desktop',
         type: 'receiver',
         services: HALLELUJAHBEAMER_SERVICES.join(','),
-        omt: String(NETWORK_PORTS.omt),
-        ndi: String(NETWORK_PORTS.ndi),
-        usb: String(NETWORK_PORTS.usb),
-        control: String(NETWORK_PORTS.control),
+        omt: String(ports.omt),
+        ndi: String(ports.ndi),
+        usb: String(ports.usb),
+        control: String(ports.control),
+        ipRange,
       }
     });
 
@@ -69,13 +74,20 @@ export function startMdnsService(port: number = OMT_PORT) {
       console.log(`[mDNS] Discovered NDI service:`, service.name);
       const ip = service.addresses?.[0] || service.host;
       if (ip) {
-        mdnsDiscoveredStreams.push({
-          id: `ndi-${service.name}`,
-          name: service.name,
-          ip: ip,
-          status: 'ONLINE',
-          protocol: 'NDI'
-        });
+        const id = `ndi-${service.name}`;
+        const existing = mdnsDiscoveredStreams.find(s => s.id === id);
+        if (existing) {
+          existing.ip = ip;
+          existing.status = 'ONLINE';
+        } else {
+          mdnsDiscoveredStreams.push({
+            id: id,
+            name: service.name,
+            ip: ip,
+            status: 'ONLINE',
+            protocol: 'NDI'
+          });
+        }
         if (updateCallback) updateCallback();
       }
     });
@@ -95,13 +107,20 @@ export function startMdnsService(port: number = OMT_PORT) {
       if (service.name === currentService?.name) return; // ignore self
       const ip = service.addresses?.[0] || service.host;
       if (ip) {
-        mdnsDiscoveredStreams.push({
-          id: `omt-${service.name}`,
-          name: service.name,
-          ip: ip,
-          status: 'ONLINE',
-          protocol: 'OMT'
-        });
+        const id = `omt-${service.name}`;
+        const existing = mdnsDiscoveredStreams.find(s => s.id === id);
+        if (existing) {
+          existing.ip = ip;
+          existing.status = 'ONLINE';
+        } else {
+          mdnsDiscoveredStreams.push({
+            id: id,
+            name: service.name,
+            ip: ip,
+            status: 'ONLINE',
+            protocol: 'OMT'
+          });
+        }
         if (updateCallback) updateCallback();
       }
     });

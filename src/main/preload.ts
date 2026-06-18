@@ -78,7 +78,11 @@ export interface ElectronApi {
   exportScheduleFile: (name: string, data: string) => Promise<void>;
   importScheduleFile: () => Promise<string | null>;
   getNetworkStreams: () => Promise<any[]>;
+  refreshNetworkStreams: () => Promise<any[]>;
+  deleteNetworkStream: (sourceId: string) => Promise<any[]>;
   onNetworkStreamsUpdated: (callback: (streams: any[]) => void) => void;
+  onOmtVideoFrame: (callback: (streamId: string, payload: Uint8Array) => void) => () => void;
+  onOmtAudioChunk: (callback: (streamId: string, payload: Uint8Array) => void) => () => void;
 }
 
 declare global {
@@ -222,10 +226,26 @@ const electronApi: ElectronApi = {
   getNetworkStreams(): Promise<any[]> {
     return ipcRenderer.invoke("get-network-streams");
   },
+  refreshNetworkStreams(): Promise<any[]> {
+    return ipcRenderer.invoke("refresh-network-streams");
+  },
+  deleteNetworkStream(sourceId: string): Promise<any[]> {
+    return ipcRenderer.invoke("delete-network-stream", sourceId);
+  },
   onNetworkStreamsUpdated(callback: (streams: any[]) => void): () => void {
     const listener = (_event: any, streams: any[]) => callback(streams);
     ipcRenderer.on("network-streams-updated", listener);
     return () => ipcRenderer.removeListener("network-streams-updated", listener);
+  },
+  onOmtVideoFrame(callback: (streamId: string, payload: Uint8Array) => void): () => void {
+    const listener = (_event: any, streamId: string, payload: Uint8Array) => callback(streamId, payload);
+    ipcRenderer.on("omt-video-frame", listener);
+    return () => ipcRenderer.removeListener("omt-video-frame", listener);
+  },
+  onOmtAudioChunk(callback: (streamId: string, payload: Uint8Array) => void): () => void {
+    const listener = (_event: any, streamId: string, payload: Uint8Array) => callback(streamId, payload);
+    ipcRenderer.on("omt-audio-chunk", listener);
+    return () => ipcRenderer.removeListener("omt-audio-chunk", listener);
   }
 };
 

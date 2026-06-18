@@ -64,6 +64,11 @@ interface SettingsSnapshot {
   backgroundPositionY: number;
   textPositionX: number;
   textPositionY: number;
+  networkIpRange: string;
+  networkOmtPort: number;
+  networkNdiPort: number;
+  networkUsbPort: number;
+  networkControlPort: number;
 }
 
 interface IntegrationStatus {
@@ -74,6 +79,10 @@ interface IntegrationStatus {
 }
 
 interface ExtendedElectronApi {
+  getNetworkStreams?: () => Promise<any[]>;
+  refreshNetworkStreams?: () => Promise<any[]>;
+  deleteNetworkStream?: (sourceId: string) => Promise<any[]>;
+  onNetworkStreamsUpdated?: (callback: (streams: any[]) => void) => () => void;
   saveIntegrationSettings?: (
     settings: Record<string, string | undefined>,
   ) => Promise<{ success: boolean; error?: string }>;
@@ -114,6 +123,11 @@ const DEFAULT_SETTINGS: SettingsSnapshot = {
   backgroundPositionY: 50,
   textPositionX: 50,
   textPositionY: 50,
+  networkIpRange: "192.168.8.0/24",
+  networkOmtPort: 15000,
+  networkNdiPort: 5960,
+  networkUsbPort: 9001,
+  networkControlPort: 7000,
   outputRoutingMap: {},
 };
 
@@ -265,6 +279,20 @@ function coerceSettings(raw: Record<string, unknown> | null | undefined): Settin
       typeof raw?.outputRoutingMap === "object" && raw?.outputRoutingMap !== null
         ? raw.outputRoutingMap
         : DEFAULT_SETTINGS.outputRoutingMap,
+    networkIpRange:
+      typeof raw?.networkIpRange === "string"
+        ? raw.networkIpRange
+        : DEFAULT_SETTINGS.networkIpRange,
+    networkOmtPort:
+      typeof raw?.networkOmtPort === "number" ? raw.networkOmtPort : DEFAULT_SETTINGS.networkOmtPort,
+    networkNdiPort:
+      typeof raw?.networkNdiPort === "number" ? raw.networkNdiPort : DEFAULT_SETTINGS.networkNdiPort,
+    networkUsbPort:
+      typeof raw?.networkUsbPort === "number" ? raw.networkUsbPort : DEFAULT_SETTINGS.networkUsbPort,
+    networkControlPort:
+      typeof raw?.networkControlPort === "number"
+        ? raw.networkControlPort
+        : DEFAULT_SETTINGS.networkControlPort,
   } as SettingsSnapshot;
 }
 
@@ -419,6 +447,22 @@ const ICON_PATHS: Record<string, ReactNode> = {
     <>
       <circle cx="10.5" cy="10.5" r="6.5" />
       <path d="M16 16l4 4" />
+    </>
+  ),
+  refresh: (
+    <>
+      <path d="M20 6v5h-5" />
+      <path d="M4 18v-5h5" />
+      <path d="M18 9a7 7 0 0 0-11.7-3.1L4 8" />
+      <path d="M6 15a7 7 0 0 0 11.7 3.1L20 16" />
+    </>
+  ),
+  delete: (
+    <>
+      <path d="M4 7h16" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M6 7l1 14h10l1-14" />
+      <path d="M9 7V4h6v3" />
     </>
   ),
   security: (
@@ -2275,7 +2319,13 @@ export default function SettingsPage({ onClose, onOpenStudio }: SettingsPageProp
               )}
 
               {active === "mapping" && <ScreenMapping outputs={selectedOutputs} />}
-              {active === "ndi" && <NdiPipeline outputs={selectedOutputs} />}
+              {active === "ndi" && (
+                <NdiPipeline
+                  outputs={selectedOutputs}
+                  settings={settings}
+                  updateSettings={updateSettings}
+                />
+              )}
               {active === "matrix" && <OutputMatrix outputs={selectedOutputs} onToggle={toggleOutput} settings={settings} updateSettings={updateSettings} />}
 
               {active === "patching" && <PatchMatrix outputs={selectedOutputs} onToggle={toggleOutput} />}
@@ -2530,29 +2580,142 @@ function ScreenMapping({
 
 function NdiPipeline({
   outputs,
+  settings,
+  updateSettings,
 }: {
   outputs: Array<{ id: string; label: string; kind: string; selected: boolean }>;
+  settings: SettingsSnapshot;
+  updateSettings: (patch: Partial<SettingsSnapshot>) => void;
 }) {
   const [streams, setStreams] = useState<any[]>([]);
 
+  const updatePort = (
+    key: "networkOmtPort" | "networkNdiPort" | "networkUsbPort" | "networkControlPort",
+    value: string,
+  ) => {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isNaN(parsed)) {
+      updateSettings({ [key]: Math.max(1024, Math.min(65535, parsed)) } as Partial<SettingsSnapshot>);
+    }
+  };
+
   useEffect(() => {
     const api = extendedElectron();
+    let cleanup: (() => void) | undefined;
+    
     if (api.getNetworkStreams) {
       api.getNetworkStreams().then(setStreams).catch(console.error);
     }
     if (api.onNetworkStreamsUpdated) {
-      return api.onNetworkStreamsUpdated((s: any[]) => setStreams(s));
+      cleanup = api.onNetworkStreamsUpdated((s: any[]) => setStreams(s));
     }
+    
+    return () => {
+      if (cleanup) cleanup();
+    };
   }, []);
 
-  const streamRows: Array<[string, string, string]> = streams.length > 0 
-    ? streams.map(s => [s.name || "Unknown", s.ip || s.id || "-", s.status || "ONLINE"])
-    : [["No streams discovered", "-", "-"]];
+  const refreshStreams = async () => {
+    const api = extendedElectron();
+    if (api.refreshNetworkStreams) {
+      setStreams(await api.refreshNetworkStreams());
+    } else if (api.getNetworkStreams) {
+      setStreams(await api.getNetworkStreams());
+    }
+  };
+
+  const deleteStream = async (sourceId: string) => {
+    const api = extendedElectron();
+    if (api.deleteNetworkStream) {
+      setStreams(await api.deleteNetworkStream(sourceId));
+    }
+  };
 
   return (
     <>
+      <Panel title="Network Receiver Profile" icon="settings_input_antenna" className="col-span-12">
+        <div className="grid gap-3 md:grid-cols-5">
+          <Field label="IP Range">
+            <Input
+              value={settings.networkIpRange}
+              onChange={(value) => updateSettings({ networkIpRange: value })}
+              placeholder="192.168.8.0/24"
+            />
+          </Field>
+          <Field label="OMT Port">
+            <Input
+              type="number"
+              value={settings.networkOmtPort}
+              onChange={(value) => updatePort("networkOmtPort", value)}
+            />
+          </Field>
+          <Field label="NDI Port">
+            <Input
+              type="number"
+              value={settings.networkNdiPort}
+              onChange={(value) => updatePort("networkNdiPort", value)}
+            />
+          </Field>
+          <Field label="USB Port">
+            <Input
+              type="number"
+              value={settings.networkUsbPort}
+              onChange={(value) => updatePort("networkUsbPort", value)}
+            />
+          </Field>
+          <Field label="Control Port">
+            <Input
+              type="number"
+              value={settings.networkControlPort}
+              onChange={(value) => updatePort("networkControlPort", value)}
+            />
+          </Field>
+        </div>
+        <div className="mt-3 font-mono text-[10px] leading-5 text-[#86948a]">
+          Set the same media ports in HB CAM TX manual connection. Each phone is listed independently by protocol and phone IP.
+        </div>
+      </Panel>
       <Panel title="NDI/OMT Source Discovery" icon="search" className="col-span-7">
-        <CompactRows rows={streamRows} />
+        <div className="mb-3 flex items-center justify-between">
+          <div className="font-mono text-[10px] uppercase text-[#86948a]">
+            {streams.length ? `${streams.length} source${streams.length === 1 ? "" : "s"}` : "No sources"}
+          </div>
+          <button
+            onClick={() => void refreshStreams()}
+            className="flex h-7 items-center gap-1 border border-[#3c4a42] bg-[#1f1f22] px-2 font-mono text-[10px] uppercase text-[#4edea3] hover:border-[#4edea3]"
+          >
+            <Icon name="refresh" className="text-[15px]" />
+            Refresh
+          </button>
+        </div>
+        <div className="space-y-2">
+          {streams.length === 0 ? (
+            <div className="border border-dashed border-[#3c4a42] p-4 text-center font-mono text-[11px] text-[#86948a]">
+              No NDI/OMT sources discovered.
+            </div>
+          ) : (
+            streams.map((stream) => (
+              <div
+                key={stream.id}
+                className="grid grid-cols-[1fr_88px_88px_32px] items-center gap-2 border border-[#3c4a42] bg-[#0d0d0f] px-2 py-2"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-mono text-[11px] text-[#e4e1e6]">{stream.name || "Unknown Source"}</div>
+                  <div className="truncate font-mono text-[10px] text-[#86948a]">{stream.ip || stream.port || stream.id || "-"}</div>
+                </div>
+                <div className="font-mono text-[10px] text-[#4edea3]">{stream.protocol || "OMT"}</div>
+                <div className="font-mono text-[10px] text-[#bbcabf]">{stream.status || "ONLINE"}</div>
+                <button
+                  title="Delete source"
+                  onClick={() => void deleteStream(stream.id)}
+                  className="flex h-7 w-7 items-center justify-center border border-[#3c4a42] text-[#ffb4ab] hover:border-[#ffb4ab]"
+                >
+                  <Icon name="delete" className="text-[15px]" />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
       </Panel>
       <Panel title="Network Performance" icon="speed" className="col-span-5">
         <div className="space-y-3">

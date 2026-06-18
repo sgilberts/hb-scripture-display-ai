@@ -20,6 +20,7 @@ import abstractBackgroundUrl from "../assets/abstract-motion-background.png";
 import OutputCanvas from "./OutputCanvas";
 import ThemeDesigner from "./ThemeDesigner";
 import { LiveCamera } from "./LiveCamera";
+import NetworkStreamView from "./NetworkStreamView";
 import ChromaKeyCanvas from "./ChromaKeyCanvas";
 import MediaChromaWrapper from "./MediaChromaWrapper";
 import { hexToRgb, computeAutoChromaSettings, type ChromaKeySettings } from "../core/chromaKeyEngine";
@@ -434,12 +435,18 @@ export default function ControlPanel({
   // Subscribe to live network streams from main process
   useEffect(() => {
     const api = window.electron as any;
+    let cleanup: (() => void) | undefined;
+    
     if (api.getNetworkStreams) {
       api.getNetworkStreams().then(setNetworkStreams).catch(console.error);
     }
     if (api.onNetworkStreamsUpdated) {
-      return api.onNetworkStreamsUpdated((s: any[]) => setNetworkStreams(s));
+      cleanup = api.onNetworkStreamsUpdated((s: any[]) => setNetworkStreams(s));
     }
+    
+    return () => {
+      if (cleanup) cleanup();
+    };
   }, []);
 
   const handleCameraLayerToggle = (cameraId: number, layer: number) => {
@@ -613,6 +620,18 @@ export default function ControlPanel({
             forceTransparentBg={isTransparentTheme}
           />
         </div>
+      );
+    } else if (
+      (effectiveType === "OMT" || effectiveType === "NDI" || (cam as any).networkStreamId) &&
+      ((cam as any).networkStreamId || effectiveMediaPath)
+    ) {
+      mediaContent = (
+        <NetworkStreamView
+          streamId={(cam as any).networkStreamId || effectiveMediaPath}
+          className="h-full w-full"
+          muted={effectiveMuted}
+          inputId={cam.id}
+        />
       );
     } else if (cam.type !== "Camera" && cam.type !== "Virtual Set" && cam.type !== "NDI") {
       mediaContent = (

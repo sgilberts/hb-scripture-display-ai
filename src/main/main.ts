@@ -35,10 +35,10 @@ import { importLyricsFromHbl } from "./lyrics_sync";
 import { processBibleImport } from "./importer";
 import { startOmtReceiver, stopOmtReceiver, discoveredOmtStreams, setOmtUpdateCallback } from "./omt_receiver";
 import { startMdnsService, stopMdnsService, mdnsDiscoveredStreams, setMdnsUpdateCallback } from "./mdns_service";
-import { scanUsbDevices, startUsbReceiver, stopUsbReceiver, discoveredUsbStreams, setUsbUpdateCallback } from "./usb_receiver";
+import { scanUsbDevices, startUsbReceiver, startUsbTetherReceiver, stopUsbReceiver, discoveredUsbStreams, setUsbUpdateCallback } from "./usb_receiver";
 import { startDiscoveryResponder, stopDiscoveryResponder } from "./discovery_responder";
 import { ensureFirewallRules } from "./firewall_rules";
-import { OMT_PORT } from "./network_constants";
+import { CONTROL_PORT, NDI_PORT, OMT_PORT, USB_PORT } from "./network_constants";
 import type {
   AudioScriptureAnalysis,
   BackgroundStyle,
@@ -55,6 +55,18 @@ import type {
 const VOSK_MODEL_PROTOCOL = "hb-vosk";
 const VOSK_MODEL_ARCHIVE = "vosk-model-small-en-us-0.15.tar.gz";
 const VOSK_MODEL_ARCHIVES = new Set([VOSK_MODEL_ARCHIVE]);
+const NETWORK_SOURCES_FILE = "network-sources.json";
+
+interface NetworkStreamRecord {
+  id: string;
+  name: string;
+  ip?: string;
+  ipAddress?: string;
+  port?: string;
+  protocol: string;
+  status: "ONLINE" | "OFFLINE" | "IN-USE";
+  lastSeen?: string;
+}
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -187,6 +199,11 @@ interface AppSettings {
   // DeepSpeech model/scorer paths (optional)
   deepspeechModelPath?: string;
   deepspeechScorerPath?: string;
+  networkIpRange: string;
+  networkOmtPort: number;
+  networkNdiPort: number;
+  networkUsbPort: number;
+  networkControlPort: number;
 }
 
 interface GeminiGenerateContentResponse {
@@ -337,6 +354,11 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   pollyVoiceId: "Joanna",
   // Optional external bible database path
   bibleDatabasePath: "",
+  networkIpRange: "192.168.8.0/24",
+  networkOmtPort: OMT_PORT,
+  networkNdiPort: NDI_PORT,
+  networkUsbPort: USB_PORT,
+  networkControlPort: CONTROL_PORT,
 };
 
 let mainWindow: BrowserWindow | null = null;
@@ -344,6 +366,7 @@ let latestProjectionState: ProjectionUpdatePayload = DEFAULT_PROJECTION_STATE;
 let cachedSettings: AppSettings = { ...DEFAULT_APP_SETTINGS };
 const outputWindows = new Map<string, OutputWindowRecord>();
 let escapeShortcutRegistered = false;
+let restartNetworkRuntime: ((settings: AppSettings) => void) | null = null;
 
 // DeepSpeech model instance (loaded lazily). Paths are persisted in cachedSettings.
 // Model typically expects 16kHz, mono, 16-bit PCM audio.
@@ -373,6 +396,14 @@ function normalizeOutputIds(outputIds: unknown): string[] {
         .filter(Boolean),
     ),
   );
+}
+
+function normalizePort(raw: unknown, fallback: number): number {
+  const parsed =
+    typeof raw === "number" ? raw : Number.parseInt(String(raw ?? ""), 10);
+  return Number.isInteger(parsed) && parsed >= 1024 && parsed <= 65535
+    ? parsed
+    : fallback;
 }
 
 function normalizeLowerThirdStyle(value: unknown): LowerThirdStyle {
@@ -595,6 +626,26 @@ async function loadSettings(): Promise<AppSettings> {
       defaultThemeId_LYRICS: parsed.defaultThemeId_LYRICS || null,
       defaultThemeId_TIMER: parsed.defaultThemeId_TIMER || null,
       outputRoutingMap: parsed.outputRoutingMap || {},
+      networkIpRange:
+        typeof parsed.networkIpRange === "string"
+          ? parsed.networkIpRange.trim()
+          : DEFAULT_APP_SETTINGS.networkIpRange,
+      networkOmtPort: normalizePort(
+        parsed.networkOmtPort,
+        DEFAULT_APP_SETTINGS.networkOmtPort,
+      ),
+      networkNdiPort: normalizePort(
+        parsed.networkNdiPort,
+        DEFAULT_APP_SETTINGS.networkNdiPort,
+      ),
+      networkUsbPort: normalizePort(
+        parsed.networkUsbPort,
+        DEFAULT_APP_SETTINGS.networkUsbPort,
+      ),
+      networkControlPort: normalizePort(
+        parsed.networkControlPort,
+        DEFAULT_APP_SETTINGS.networkControlPort,
+      ),
     };
   } catch {
     return { ...DEFAULT_APP_SETTINGS };
@@ -604,6 +655,13 @@ async function loadSettings(): Promise<AppSettings> {
 async function saveSettings(nextSettings: Partial<AppSettings>): Promise<void> {
   const settingsPath = await getSettingsPath();
   console.log("Saving settings to:", settingsPath, "with:", nextSettings);
+  const previousNetworkSignature = [
+    cachedSettings.networkIpRange,
+    cachedSettings.networkOmtPort,
+    cachedSettings.networkNdiPort,
+    cachedSettings.networkUsbPort,
+    cachedSettings.networkControlPort,
+  ].join("|");
   const merged: AppSettings = {
     ...cachedSettings,
     currentBibleTranslation:
@@ -719,11 +777,42 @@ async function saveSettings(nextSettings: Partial<AppSettings>): Promise<void> {
     defaultThemeId_LYRICS: nextSettings.defaultThemeId_LYRICS ?? cachedSettings.defaultThemeId_LYRICS,
     defaultThemeId_TIMER: nextSettings.defaultThemeId_TIMER ?? cachedSettings.defaultThemeId_TIMER,
     outputRoutingMap: nextSettings.outputRoutingMap ?? cachedSettings.outputRoutingMap,
+    networkIpRange:
+      typeof nextSettings.networkIpRange === "string"
+        ? nextSettings.networkIpRange.trim()
+        : cachedSettings.networkIpRange,
+    networkOmtPort: normalizePort(
+      nextSettings.networkOmtPort,
+      cachedSettings.networkOmtPort,
+    ),
+    networkNdiPort: normalizePort(
+      nextSettings.networkNdiPort,
+      cachedSettings.networkNdiPort,
+    ),
+    networkUsbPort: normalizePort(
+      nextSettings.networkUsbPort,
+      cachedSettings.networkUsbPort,
+    ),
+    networkControlPort: normalizePort(
+      nextSettings.networkControlPort,
+      cachedSettings.networkControlPort,
+    ),
   };
 
   cachedSettings = merged;
 
   await writeFile(settingsPath, JSON.stringify(merged, null, 2), "utf8");
+
+  const nextNetworkSignature = [
+    merged.networkIpRange,
+    merged.networkOmtPort,
+    merged.networkNdiPort,
+    merged.networkUsbPort,
+    merged.networkControlPort,
+  ].join("|");
+  if (previousNetworkSignature !== nextNetworkSignature) {
+    restartNetworkRuntime?.(merged);
+  }
 }
 
 function getRendererEntryUrl(): string | null {
@@ -1797,44 +1886,163 @@ function registerAppLifecycle(): void {
   });
 
   app.whenReady().then(async () => {
+    cachedSettings = await loadSettings();
     void ensureFirewallRules();
-    startOmtReceiver(OMT_PORT);
-    startMdnsService(OMT_PORT);
-    startDiscoveryResponder();
+
+    const buildNetworkPorts = (settings: AppSettings) => ({
+      omt: settings.networkOmtPort,
+      ndi: settings.networkNdiPort,
+      usb: settings.networkUsbPort,
+      control: settings.networkControlPort,
+    });
+
+    const startNetworkRuntimeServices = (settings: AppSettings) => {
+      const ports = buildNetworkPorts(settings);
+      startOmtReceiver(ports.omt, 'OMT');
+      startOmtReceiver(ports.ndi, 'NDI');
+      startMdnsService(ports.omt, ports, settings.networkIpRange);
+      startDiscoveryResponder(ports.control, ports, settings.networkIpRange);
+      startUsbTetherReceiver(ports.usb);
+    };
+
+    startNetworkRuntimeServices(cachedSettings);
     scanUsbDevices(); // Scan once on startup
     setInterval(scanUsbDevices, 5000); // Poll for new USB devices
 
-    const getMergedStreams = () => {
-      const allMdns = mdnsDiscoveredStreams;
-      const allOmt = discoveredOmtStreams;
-      const allUsb = discoveredUsbStreams;
-      
-      const merged: any[] = [...allOmt];
-      for (const m of allMdns) {
-        if (m.protocol === 'OMT') {
-          // If we already have an active TCP connection from this IP, skip it
-          if (!merged.find(s => s.ip === m.ip && s.protocol === 'OMT')) {
-            merged.push(m);
-          }
-        } else {
-          merged.push(m);
-        }
+    const persistedNetworkSourcesPath = path.join(app.getPath("userData"), NETWORK_SOURCES_FILE);
+    let persistedNetworkSources: NetworkStreamRecord[] = [];
+    const hiddenNetworkSourceKeys = new Set<string>();
+
+    const networkSourceKey = (stream: any): string => {
+      const protocol = String(stream.protocol || "OMT").toUpperCase();
+      const ip = String(stream.ip || stream.ipAddress || "").trim();
+      const port = String(stream.port || "").trim();
+      const name = String(stream.name || stream.id || "source").trim();
+      return `${protocol}:${ip || port || name}`.toLowerCase();
+    };
+
+    const loadPersistedNetworkSources = async () => {
+      try {
+        const raw = await readFile(persistedNetworkSourcesPath, "utf8");
+        const decoded = JSON.parse(raw) as unknown;
+        persistedNetworkSources = Array.isArray(decoded)
+          ? decoded.filter((entry): entry is NetworkStreamRecord => Boolean(entry && typeof entry === "object"))
+          : [];
+      } catch {
+        persistedNetworkSources = [];
       }
-      return [...merged, ...allUsb];
+    };
+
+    const savePersistedNetworkSources = async () => {
+      try {
+        await mkdir(path.dirname(persistedNetworkSourcesPath), { recursive: true });
+        await writeFile(
+          persistedNetworkSourcesPath,
+          JSON.stringify(persistedNetworkSources, null, 2),
+          "utf8",
+        );
+      } catch (error) {
+        console.warn("[Network] Failed to save discovered source registry:", error);
+      }
+    };
+
+    const getMergedStreams = () => {
+      const merged = new Map<string, NetworkStreamRecord>();
+      const priority: Record<string, number> = { 'IN-USE': 3, ONLINE: 2, OFFLINE: 1 };
+
+      const addStream = (stream: any, persist = true) => {
+        const protocol = String(stream.protocol || 'OMT').toUpperCase();
+        const ip = stream.ip || stream.ipAddress || '';
+        const normalized: NetworkStreamRecord = {
+          ...stream,
+          id: stream.id || `${protocol.toLowerCase()}-${ip || stream.port || stream.name}`,
+          protocol,
+          ip,
+          name: stream.name || `${protocol} Source`,
+          status: stream.status || 'ONLINE',
+          lastSeen: stream.lastSeen || new Date().toISOString(),
+        };
+        const key = networkSourceKey(normalized);
+        if (hiddenNetworkSourceKeys.has(key)) return;
+
+        const existing = merged.get(key);
+        if (!existing || (priority[normalized.status] ?? 0) >= (priority[existing.status] ?? 0)) {
+          merged.set(key, normalized);
+        }
+
+        if (persist && normalized.status !== "OFFLINE") {
+          const persistedIndex = persistedNetworkSources.findIndex((entry) => networkSourceKey(entry) === key);
+          const persistedRecord = { ...normalized, status: "OFFLINE" as const };
+          if (persistedIndex >= 0) {
+            persistedNetworkSources[persistedIndex] = {
+              ...persistedNetworkSources[persistedIndex],
+              ...persistedRecord,
+            };
+          } else {
+            persistedNetworkSources.push(persistedRecord);
+          }
+          void savePersistedNetworkSources();
+        }
+      };
+
+      persistedNetworkSources.forEach((stream) => addStream({ ...stream, status: stream.status || "OFFLINE" }, false));
+      discoveredOmtStreams.forEach((stream) => addStream(stream));
+      mdnsDiscoveredStreams.forEach((stream) => addStream(stream));
+      discoveredUsbStreams.forEach((stream) => addStream(stream));
+
+      return Array.from(merged.values()).sort((a, b) => {
+        const score = (priority[b.status] ?? 0) - (priority[a.status] ?? 0);
+        return score || String(a.protocol).localeCompare(String(b.protocol)) || String(a.name).localeCompare(String(b.name));
+      });
     };
 
     const broadcastNetworkStreams = () => {
       const allStreams = getMergedStreams();
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('network-streams-updated', allStreams);
+      const windows = BrowserWindow.getAllWindows();
+      for (const win of windows) {
+        if (!win.isDestroyed()) {
+          win.webContents.send('network-streams-updated', allStreams);
+        }
       }
     };
     
     setOmtUpdateCallback(broadcastNetworkStreams);
     setMdnsUpdateCallback(broadcastNetworkStreams);
     setUsbUpdateCallback(broadcastNetworkStreams);
+
+    restartNetworkRuntime = (settings: AppSettings) => {
+      stopOmtReceiver();
+      stopMdnsService();
+      stopDiscoveryResponder();
+      stopUsbReceiver();
+      setTimeout(() => {
+        startNetworkRuntimeServices(settings);
+        void scanUsbDevices();
+        broadcastNetworkStreams();
+      }, 300);
+    };
+
+    await loadPersistedNetworkSources();
     
     ipcMain.handle('get-network-streams', () => {
+      return getMergedStreams();
+    });
+
+    ipcMain.handle('refresh-network-streams', async () => {
+      hiddenNetworkSourceKeys.clear();
+      await scanUsbDevices();
+      broadcastNetworkStreams();
+      return getMergedStreams();
+    });
+
+    ipcMain.handle('delete-network-stream', async (_event, sourceId: string) => {
+      const source = getMergedStreams().find((stream) => stream.id === sourceId);
+      if (!source) return getMergedStreams();
+      const key = networkSourceKey(source);
+      hiddenNetworkSourceKeys.add(key);
+      persistedNetworkSources = persistedNetworkSources.filter((stream) => networkSourceKey(stream) !== key);
+      await savePersistedNetworkSources();
+      broadcastNetworkStreams();
       return getMergedStreams();
     });
 
@@ -1845,7 +2053,6 @@ function registerAppLifecycle(): void {
     await registerVoskModelProtocol();
     await initializeDatabase();
     await importLyricsFromHbl();
-    cachedSettings = await loadSettings();
     latestProjectionState = {
       ...DEFAULT_PROJECTION_STATE,
       currentBibleTranslation: cachedSettings.currentBibleTranslation,
