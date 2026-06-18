@@ -24,8 +24,21 @@ import {
   navigateScriptureInPath,
   searchVerses,
   searchVersesInPath,
+  saveLyric,
+  getLyrics,
+  deleteLyric,
+  saveSchedule,
+  getSchedules,
+  deleteSchedule
 } from "./db";
+import { importLyricsFromHbl } from "./lyrics_sync";
 import { processBibleImport } from "./importer";
+import { startOmtReceiver, stopOmtReceiver, discoveredOmtStreams, setOmtUpdateCallback } from "./omt_receiver";
+import { startMdnsService, stopMdnsService, mdnsDiscoveredStreams, setMdnsUpdateCallback } from "./mdns_service";
+import { scanUsbDevices, startUsbReceiver, stopUsbReceiver, discoveredUsbStreams, setUsbUpdateCallback } from "./usb_receiver";
+import { startDiscoveryResponder, stopDiscoveryResponder } from "./discovery_responder";
+import { ensureFirewallRules } from "./firewall_rules";
+import { OMT_PORT } from "./network_constants";
 import type {
   AudioScriptureAnalysis,
   BackgroundStyle,
@@ -1775,9 +1788,63 @@ function registerAppLifecycle(): void {
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows', 'true');
 
+  app.on("will-quit", () => {
+    stopOmtReceiver();
+    stopMdnsService();
+    stopDiscoveryResponder();
+    stopUsbReceiver();
+    globalShortcut.unregisterAll();
+  });
+
   app.whenReady().then(async () => {
+    void ensureFirewallRules();
+    startOmtReceiver(OMT_PORT);
+    startMdnsService(OMT_PORT);
+    startDiscoveryResponder();
+    scanUsbDevices(); // Scan once on startup
+    setInterval(scanUsbDevices, 5000); // Poll for new USB devices
+
+    const getMergedStreams = () => {
+      const allMdns = mdnsDiscoveredStreams;
+      const allOmt = discoveredOmtStreams;
+      const allUsb = discoveredUsbStreams;
+      
+      const merged: any[] = [...allOmt];
+      for (const m of allMdns) {
+        if (m.protocol === 'OMT') {
+          // If we already have an active TCP connection from this IP, skip it
+          if (!merged.find(s => s.ip === m.ip && s.protocol === 'OMT')) {
+            merged.push(m);
+          }
+        } else {
+          merged.push(m);
+        }
+      }
+      return [...merged, ...allUsb];
+    };
+
+    const broadcastNetworkStreams = () => {
+      const allStreams = getMergedStreams();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('network-streams-updated', allStreams);
+      }
+    };
+    
+    setOmtUpdateCallback(broadcastNetworkStreams);
+    setMdnsUpdateCallback(broadcastNetworkStreams);
+    setUsbUpdateCallback(broadcastNetworkStreams);
+    
+    ipcMain.handle('get-network-streams', () => {
+      return getMergedStreams();
+    });
+
+    ipcMain.handle('start-usb-receiver', (event, path: string) => {
+        startUsbReceiver(path);
+    });
+
     await registerVoskModelProtocol();
     await initializeDatabase();
+    await importLyricsFromHbl();
     cachedSettings = await loadSettings();
     latestProjectionState = {
       ...DEFAULT_PROJECTION_STATE,
@@ -2019,6 +2086,34 @@ function registerAppLifecycle(): void {
       };
     });
     ipcMain.handle("get-app-settings", async () => cachedSettings);
+    ipcMain.handle("save-lyric", async (_event, record) => saveLyric(record));
+    ipcMain.handle("get-lyrics", async () => getLyrics());
+    ipcMain.handle("delete-lyric", async (_event, id) => deleteLyric(id));
+    ipcMain.handle("save-schedule", async (_event, record) => saveSchedule(record));
+    ipcMain.handle("get-schedules", async () => getSchedules());
+    ipcMain.handle("delete-schedule", async (_event, id) => deleteSchedule(id));
+    ipcMain.handle("export-schedule-file", async (_event, name, data) => {
+      const { canceled, filePath } = await dialog.showSaveDialog({
+        title: "Save Schedule",
+        defaultPath: `${name}.hbs`,
+        filters: [{ name: "Hallelujah Beamer Schedule", extensions: ["hbs"] }]
+      });
+      if (!canceled && filePath) {
+        await writeFile(filePath, data, "utf8");
+      }
+    });
+    ipcMain.handle("import-schedule-file", async () => {
+      const { canceled, filePaths } = await dialog.showOpenDialog({
+        title: "Open Schedule",
+        properties: ["openFile"],
+        filters: [{ name: "Hallelujah Beamer Schedule", extensions: ["hbs"] }]
+      });
+      if (!canceled && filePaths.length > 0) {
+        const data = await readFile(filePaths[0], "utf8");
+        return data;
+      }
+      return null;
+    });
     ipcMain.handle(
       "save-integration-settings",
       async (
@@ -2219,7 +2314,6 @@ function registerAppLifecycle(): void {
     ipcMain.removeHandler("get-app-settings");
     ipcMain.removeHandler("save-app-settings");
     ipcMain.removeAllListeners("exit-output-fullscreen");
-    globalShortcut.unregisterAll();
     escapeShortcutRegistered = false;
     closeAllOutputWindows();
     screen.removeAllListeners("display-added");

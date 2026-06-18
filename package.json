@@ -14,9 +14,11 @@
   },
   "dependencies": {
     "@aws-sdk/client-polly": "^3.366.0",
+    "bonjour-service": "^1.4.1",
     "keytar": "^7.9.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "serialport": "^13.0.0",
     "sqlite3": "^5.1.7",
     "vosk-browser": "^0.0.8"
   },

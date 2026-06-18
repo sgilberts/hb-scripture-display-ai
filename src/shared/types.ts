@@ -38,6 +38,7 @@ export interface ThemeDefinition {
   referencePosition?: "TOP_LEFT" | "TOP_RIGHT" | "BOTTOM_LEFT" | "BOTTOM_RIGHT" | "BELOW_TEXT";
   referenceColor?: string;
   referenceSize?: number;
+  referenceEnabled?: boolean;
   referenceWeight?: string;
   backgroundVideoPath?: string;
   canvasElements?: CanvasElement[];
@@ -69,6 +70,7 @@ export interface CameraInput {
   live: boolean;
   type: string;
   mediaPath?: string;
+  networkStreamId?: string;
 }
 
 export interface InputSetting {
@@ -178,4 +180,17 @@ export interface AudioScriptureAnalysis {
   searchQuery?: string;
   aiEnabled: boolean;
   error?: string;
+}
+
+export interface LyricRecord {
+  id: string;
+  title: string;
+  artist: string;
+  lyrics: string; // JSON string array of sections or raw text
+}
+
+export interface ScheduleRecord {
+  id: string;
+  name: string;
+  data: string; // JSON string of schedule items (e.g., song IDs)
 }

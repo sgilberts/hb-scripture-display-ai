@@ -2533,10 +2533,26 @@ function NdiPipeline({
 }: {
   outputs: Array<{ id: string; label: string; kind: string; selected: boolean }>;
 }) {
+  const [streams, setStreams] = useState<any[]>([]);
+
+  useEffect(() => {
+    const api = extendedElectron();
+    if (api.getNetworkStreams) {
+      api.getNetworkStreams().then(setStreams).catch(console.error);
+    }
+    if (api.onNetworkStreamsUpdated) {
+      return api.onNetworkStreamsUpdated((s: any[]) => setStreams(s));
+    }
+  }, []);
+
+  const streamRows: Array<[string, string, string]> = streams.length > 0 
+    ? streams.map(s => [s.name || "Unknown", s.ip || s.id || "-", s.status || "ONLINE"])
+    : [["No streams discovered", "-", "-"]];
+
   return (
     <>
-      <Panel title="NDI Source Discovery" icon="search" className="col-span-7">
-        <CompactRows rows={FALLBACK_NDI.map(([a, b, c]) => [a, b, c])} />
+      <Panel title="NDI/OMT Source Discovery" icon="search" className="col-span-7">
+        <CompactRows rows={streamRows} />
       </Panel>
       <Panel title="Network Performance" icon="speed" className="col-span-5">
         <div className="space-y-3">

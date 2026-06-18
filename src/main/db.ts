@@ -1,10 +1,14 @@
 import { app } from "electron";
-import { mkdir } from "node:fs/promises";
+import { copyFile, mkdir, readFile } from "node:fs/promises";
+import path from "node:path";
+import sqlite3, { type Database } from "sqlite3";
+import { syncLyricsDb } from "./lyrics_sync";
 import { join } from "node:path";
-import sqlite3 from "sqlite3";
 import type {
   ScriptureNavigationDirection,
-  ScriptureRecord
+  ScriptureRecord,
+  LyricRecord,
+  ScheduleRecord
   // @ts-ignore
 } from "../shared/types";
 
@@ -301,6 +305,29 @@ async function applySchema(database: SQLiteDatabase): Promise<void> {
     `
       CREATE INDEX IF NOT EXISTS scriptures_translation_lookup_idx
       ON scriptures (translation);
+    `
+  );
+
+  await runAsync(
+    database,
+    `
+      CREATE TABLE IF NOT EXISTS lyrics (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        artist TEXT NOT NULL,
+        lyrics TEXT NOT NULL
+      );
+    `
+  );
+
+  await runAsync(
+    database,
+    `
+      CREATE TABLE IF NOT EXISTS schedules (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
     `
   );
 }
@@ -908,4 +935,63 @@ export async function navigateScriptureInPath(
   } finally {
     sourceDatabase.close();
   }
+}
+
+export async function saveLyric(record: LyricRecord): Promise<void> {
+  const database = await initializeDatabase();
+  await runAsync(
+    database,
+    `
+      INSERT INTO lyrics (id, title, artist, lyrics)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        artist = excluded.artist,
+        lyrics = excluded.lyrics;
+    `,
+    [record.id, record.title, record.artist, record.lyrics]
+  );
+  await syncLyricsDb();
+}
+
+export async function getLyrics(): Promise<LyricRecord[]> {
+  const database = await initializeDatabase();
+  return allAsync<LyricRecord>(
+    database,
+    `SELECT * FROM lyrics ORDER BY title ASC;`
+  );
+}
+
+export async function deleteLyric(id: string): Promise<void> {
+  const database = await initializeDatabase();
+  await runAsync(database, `DELETE FROM lyrics WHERE id = ?;`, [id]);
+  await syncLyricsDb();
+}
+
+export async function saveSchedule(record: ScheduleRecord): Promise<void> {
+  const database = await initializeDatabase();
+  await runAsync(
+    database,
+    `
+      INSERT INTO schedules (id, name, data)
+      VALUES (?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        data = excluded.data;
+    `,
+    [record.id, record.name, record.data]
+  );
+}
+
+export async function getSchedules(): Promise<ScheduleRecord[]> {
+  const database = await initializeDatabase();
+  return allAsync<ScheduleRecord>(
+    database,
+    `SELECT * FROM schedules ORDER BY name ASC;`
+  );
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  const database = await initializeDatabase();
+  await runAsync(database, `DELETE FROM schedules WHERE id = ?;`, [id]);
 }

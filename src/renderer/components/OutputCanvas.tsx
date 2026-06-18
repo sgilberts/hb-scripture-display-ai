@@ -79,15 +79,17 @@ export default function OutputCanvas({
   const hasContent =
     textOutputRaw.trim().length > 0 ||
     referenceOutputRaw.trim().length > 0;
-  const isScriptureContent = referenceOutputRaw.trim().length > 0;
-  const isTimerContent = textOutputRaw.includes(":") && !isNaN(Number(textOutputRaw.replace(/:/g, "")));
-  const activeTabType = isScriptureContent ? "SCRIPTURES" : (isTimerContent ? "TIMER" : "LYRICS");
+  const isLyricsContent = referenceOutputRaw === "LYRICS";
+  const isTimerContent = referenceOutputRaw === "COUNTDOWN" || referenceOutputRaw === "STOPWATCH" || referenceOutputRaw === "TIME" || (textOutputRaw.includes(":") && !isNaN(Number(textOutputRaw.replace(/:/g, ""))));
+  const isScriptureContent = !isLyricsContent && !isTimerContent && referenceOutputRaw.trim().length > 0;
+  
+  const activeTabType = isLyricsContent ? "LYRICS" : (isScriptureContent ? "SCRIPTURES" : (isTimerContent ? "TIMER" : "LYRICS"));
   const activeThemeId = forceThemeId || (state as any)[`defaultThemeId_${activeTabType}`];
   const activeCustomTheme = overrideThemeDefinition || (state.customThemes || []).find(t => t.id === activeThemeId);
 
-  const activeLowerThirdStyle = activeCustomTheme?.lowerThirdStyle ?? (isScriptureContent
-    ? state.scriptureLowerThirdStyle
-    : state.lyricsLowerThirdStyle);
+  const activeLowerThirdStyle = activeCustomTheme?.lowerThirdStyle ?? (isLyricsContent
+    ? state.lyricsLowerThirdStyle
+    : state.scriptureLowerThirdStyle);
   const backgroundStyle = activeCustomTheme?.backgroundStyle ?? state.backgroundStyle;
   const backgroundTexture = activeCustomTheme?.backgroundTexture ?? state.backgroundTexture;
   const rawBgImagePath = activeCustomTheme?.backgroundImagePath ?? state.backgroundImagePath;
@@ -108,6 +110,7 @@ export default function OutputCanvas({
   const referencePosition = activeCustomTheme?.referencePosition || "BELOW_TEXT";
   const referenceColor = activeCustomTheme?.referenceColor || undefined;
   const referenceSize = activeCustomTheme?.referenceSize || 100;
+  const referenceEnabled = activeCustomTheme?.referenceEnabled ?? true;
   const referenceWeight = activeCustomTheme?.referenceWeight || "normal";
 
   const rawBgVideoPath = activeCustomTheme?.backgroundVideoPath;
@@ -122,6 +125,8 @@ export default function OutputCanvas({
     ? textOutputRaw
     : "Let everything that has breath praise the LORD. Praise the LORD.";
 
+  const showReference = referenceEnabled && !isLyricsContent && !isTimerContent && hasContent && referenceOutputRaw.trim().length > 0;
+  
   const referenceOutput = hasContent
     ? referenceOutputRaw
     : "Psalm 150:6";
@@ -511,7 +516,7 @@ export default function OutputCanvas({
             >
               {textOutput}
             </h1>
-            {referencePosition === "BELOW_TEXT" && (
+            {showReference && referencePosition === "BELOW_TEXT" && (
               <p
                 className={joinClasses(
                   "uppercase tracking-[0.28em]",
@@ -549,7 +554,7 @@ export default function OutputCanvas({
                 >
                   {textOutput}
                 </h2>
-                {referencePosition === "BELOW_TEXT" && (
+                {showReference && referencePosition === "BELOW_TEXT" && (
                   <p
                     className={joinClasses(
                       "mt-2 uppercase tracking-[0.24em]",
@@ -573,7 +578,7 @@ export default function OutputCanvas({
       )}
 
       {/* Floating Reference Position */}
-      {referencePosition !== "BELOW_TEXT" && (
+      {showReference && referencePosition !== "BELOW_TEXT" && (
         <p
           className={joinClasses(
             "absolute uppercase tracking-[0.28em] z-20",

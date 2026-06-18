@@ -4,6 +4,8 @@ import type {
   OutputTarget,
   ScriptureNavigationDirection,
   ScriptureRecord,
+  LyricRecord,
+  ScheduleRecord
   // @ts-ignore
 } from "../shared/types";
 
@@ -67,6 +69,16 @@ export interface ElectronApi {
   deleteIntegrationSecrets: () => Promise<{ success: boolean; error?: string }>;
   exitOutputFullscreen: () => void;
   importCanvasMedia: (sourcePath: string) => Promise<{ path: string }>;
+  saveLyric: (record: LyricRecord) => Promise<void>;
+  getLyrics: () => Promise<LyricRecord[]>;
+  deleteLyric: (id: string) => Promise<void>;
+  saveSchedule: (record: ScheduleRecord) => Promise<void>;
+  getSchedules: () => Promise<ScheduleRecord[]>;
+  deleteSchedule: (id: string) => Promise<void>;
+  exportScheduleFile: (name: string, data: string) => Promise<void>;
+  importScheduleFile: () => Promise<string | null>;
+  getNetworkStreams: () => Promise<any[]>;
+  onNetworkStreamsUpdated: (callback: (streams: any[]) => void) => void;
 }
 
 declare global {
@@ -183,6 +195,38 @@ const electronApi: ElectronApi = {
   importCanvasMedia(sourcePath: string): Promise<{ path: string }> {
     return ipcRenderer.invoke("import-canvas-media", sourcePath);
   },
+  saveLyric(record: LyricRecord): Promise<void> {
+    return ipcRenderer.invoke("save-lyric", record);
+  },
+  getLyrics(): Promise<LyricRecord[]> {
+    return ipcRenderer.invoke("get-lyrics");
+  },
+  deleteLyric(id: string): Promise<void> {
+    return ipcRenderer.invoke("delete-lyric", id);
+  },
+  saveSchedule(record: ScheduleRecord): Promise<void> {
+    return ipcRenderer.invoke("save-schedule", record);
+  },
+  getSchedules(): Promise<ScheduleRecord[]> {
+    return ipcRenderer.invoke("get-schedules");
+  },
+  deleteSchedule(id: string): Promise<void> {
+    return ipcRenderer.invoke("delete-schedule", id);
+  },
+  exportScheduleFile(name: string, data: string): Promise<void> {
+    return ipcRenderer.invoke("export-schedule-file", name, data);
+  },
+  importScheduleFile(): Promise<string | null> {
+    return ipcRenderer.invoke("import-schedule-file");
+  },
+  getNetworkStreams(): Promise<any[]> {
+    return ipcRenderer.invoke("get-network-streams");
+  },
+  onNetworkStreamsUpdated(callback: (streams: any[]) => void): () => void {
+    const listener = (_event: any, streams: any[]) => callback(streams);
+    ipcRenderer.on("network-streams-updated", listener);
+    return () => ipcRenderer.removeListener("network-streams-updated", listener);
+  }
 };
 
 contextBridge.exposeInMainWorld("electron", electronApi);

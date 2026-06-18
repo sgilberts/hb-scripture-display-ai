@@ -78,6 +78,7 @@ export default function ThemeDesigner({
   const [referencePosition, setReferencePosition] = useState<"TOP_LEFT" | "TOP_RIGHT" | "BOTTOM_LEFT" | "BOTTOM_RIGHT" | "BELOW_TEXT">(initialTheme?.referencePosition || "BOTTOM_RIGHT");
   const [referenceColor, setReferenceColor] = useState(initialTheme?.referenceColor || "#9ca3af");
   const [referenceSize, setReferenceSize] = useState(initialTheme?.referenceSize || 100);
+  const [referenceEnabled, setReferenceEnabled] = useState(initialTheme?.referenceEnabled ?? true);
   const [referenceWeight, setReferenceWeight] = useState(initialTheme?.referenceWeight || "normal");
   const [bgVideoPath, setBgVideoPath] = useState(initialTheme?.backgroundVideoPath || "");
 
@@ -119,6 +120,7 @@ export default function ThemeDesigner({
     referencePosition,
     referenceColor,
     referenceSize,
+    referenceEnabled,
     referenceWeight,
     canvasElements
   };
@@ -131,7 +133,7 @@ export default function ThemeDesigner({
     themeName, tabType, lowerThirdEnabled, lowerThirdPreset, backgroundMode,
     bgImagePath, bgVideoPath, bgPosX, bgPosY, textPosX, textPosY, fillType,
     bgScale, entranceAnimation, animationDuration, animationCurve, fontFamily,
-    fontColor, referencePosition, referenceColor, referenceSize, referenceWeight,
+    fontColor, referencePosition, referenceColor, referenceSize, referenceEnabled, referenceWeight,
     canvasElements
   ]);
 
@@ -176,6 +178,7 @@ export default function ThemeDesigner({
       setReferencePosition(initialTheme.referencePosition || "BOTTOM_RIGHT");
       setReferenceColor(initialTheme.referenceColor || "#9ca3af");
       setReferenceSize(initialTheme.referenceSize || 100);
+      setReferenceEnabled(initialTheme.referenceEnabled ?? true);
       setReferenceWeight(initialTheme.referenceWeight || "normal");
       setBgVideoPath(isBlob(initialTheme.backgroundVideoPath) ? "" : (initialTheme.backgroundVideoPath || ""));
       setLowerThirdPreset(
@@ -201,6 +204,7 @@ export default function ThemeDesigner({
       setReferencePosition("BOTTOM_RIGHT");
       setReferenceColor("#9ca3af");
       setReferenceSize(100);
+      setReferenceEnabled(true);
       setReferenceWeight("normal");
       setBgVideoPath("");
       setLowerThirdPreset("Classic");
@@ -414,10 +418,10 @@ export default function ThemeDesigner({
             dangerouslySetInnerHTML={{ __html: displayText }}
             style={{ outline: textEditMode === el.id ? '1px dashed #4edea3' : 'none', cursor: textEditMode === el.id ? 'text' : 'inherit', width: '100%' }}
           />
-          {displayRef && <span 
+          {displayRef && referenceEnabled && <span 
             contentEditable={textEditMode === el.id}
             suppressContentEditableWarning
-            style={{ fontSize: `${(el.fontSize || 6) * 0.5}cqh`, color: referenceColor, fontWeight: referenceWeight as any, marginTop: "4px", letterSpacing: "0.15em", textTransform: "uppercase", outline: textEditMode === el.id ? '1px dashed #4edea3' : 'none', cursor: textEditMode === el.id ? 'text' : 'inherit', width: '100%' }}
+            style={{ fontSize: `${(el.fontSize || 6) * 0.5 * (referenceSize / 100)}cqh`, color: referenceColor, fontWeight: referenceWeight as any, marginTop: "4px", letterSpacing: "0.15em", textTransform: "uppercase", outline: textEditMode === el.id ? '1px dashed #4edea3' : 'none', cursor: textEditMode === el.id ? 'text' : 'inherit', width: '100%' }}
             dangerouslySetInnerHTML={{ __html: displayRef }}
           />}
         </div>
@@ -1815,14 +1819,25 @@ export default function ThemeDesigner({
                       </select>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-xs" style={{ color: "#9ca3af" }}>Ref Color</span>
+                      <span className="text-xs" style={{ color: "#9ca3af" }}>Show Reference</span>
                       <input
-                        type="color"
-                        value={referenceColor}
-                        onChange={(e) => setReferenceColor(e.target.value)}
-                        className="w-8 h-8 rounded border border-[#39393c] cursor-pointer bg-[#39393c]"
+                        type="checkbox"
+                        checked={referenceEnabled}
+                        onChange={(e) => setReferenceEnabled(e.target.checked)}
+                        className="w-4 h-4 accent-[#10b981] cursor-pointer"
                       />
                     </div>
+                    {referenceEnabled && (
+                      <>
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs" style={{ color: "#9ca3af" }}>Ref Color</span>
+                          <input
+                            type="color"
+                            value={referenceColor}
+                            onChange={(e) => setReferenceColor(e.target.value)}
+                            className="w-8 h-8 rounded border border-[#39393c] cursor-pointer bg-[#39393c]"
+                          />
+                        </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs" style={{ color: "#9ca3af" }}>Ref Size (%)</span>
                       <input
@@ -1849,6 +1864,8 @@ export default function ThemeDesigner({
                         <option value="900">Black</option>
                       </select>
                     </div>
+                    </>
+                  )}
                   </div>
                 )}
               </div>

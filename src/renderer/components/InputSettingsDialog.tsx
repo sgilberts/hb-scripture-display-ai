@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppStateMatrix, InputSetting } from '../../shared/types';
 
 export interface InputSettingsDialogProps {
@@ -29,6 +29,10 @@ function joinClasses(
   ...values: Array<string | false | null | undefined>
 ): string {
   return values.filter(Boolean).join(' ');
+}
+
+function extendedElectron() {
+  return window.electron as any;
 }
 
 const SliderRow = ({
@@ -177,6 +181,17 @@ export default function InputSettingsDialog({
     );
 
     const NDITabContent = () => {
+        const [streams, setStreams] = useState<any[]>([]);
+
+        useEffect(() => {
+            const api = extendedElectron();
+            if (api.getNetworkStreams) {
+                api.getNetworkStreams().then(setStreams).catch(console.error);
+            }
+            if (api.onNetworkStreamsUpdated) {
+                return api.onNetworkStreamsUpdated((s: any[]) => setStreams(s));
+            }
+        }, []);
         return (
             <div className="flex flex-col h-full bg-[#131316] text-[#e4e1e6] w-full" onClick={(e) => e.stopPropagation()}>
                 {/* Top Action Bar */}
@@ -218,35 +233,41 @@ export default function InputSettingsDialog({
                 {/* Grid Area */}
                 <div className="flex-1 bg-[#131316] px-2 py-3 overflow-y-auto border-b border-[#3c4a42]">
                     
-                    {/* vMix Group */}
                     <div className="relative mb-6">
-                        <div className="absolute -top-1 left-2 text-[9px] text-[#bbcabf] bg-[#131316] px-1 z-10 uppercase">vMix</div>
+                        <div className="absolute -top-1 left-2 text-[9px] text-[#bbcabf] bg-[#131316] px-1 z-10 uppercase">Discovered Streams</div>
                         <div className="border-t border-[#3c4a42] mt-0.5 pt-3 grid grid-cols-4 gap-3 px-1">
-                            {[1, 2, 3, 4].map(num => (
-                                <div key={`vmix-${num}`} className="flex flex-col items-center">
+                            {streams.length === 0 ? (
+                                <div className="col-span-4 text-[11px] text-[#86948a] p-4 text-center border border-dashed border-[#3c4a42]">No streams discovered on the network.</div>
+                            ) : streams.map((stream, idx) => (
+                                <div key={stream.id} className="flex flex-col items-center group">
                                     <div className="w-full aspect-video bg-[#0d0d0f] relative border border-[#3c4a42] shadow-sm flex items-center justify-center overflow-hidden hover:border-[#4edea3] transition-colors cursor-pointer">
                                         <ColorBars />
-                                        <div className="absolute bottom-0 left-0 bg-[#1f1f22] text-[#4edea3] text-[9px] font-bold px-1.5 py-0.5 z-10 border-t border-r border-[#3c4a42]">{num % 2 === 0 ? 'NDI' : 'OMT'}</div>
+                                        <div className="absolute bottom-0 left-0 bg-[#1f1f22] text-[#4edea3] text-[9px] font-bold px-1.5 py-0.5 z-10 border-t border-r border-[#3c4a42]">{stream.protocol}</div>
+                                        {/* Save overlay on hover */}
+                                        <button
+                                            className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 text-[#4edea3] text-[9px] font-bold"
+                                            onClick={() => {
+                                                setCameraInputs((prev: any[]) => {
+                                                    const exists = prev.find((c: any) => c.networkStreamId === stream.id);
+                                                    if (exists) return prev;
+                                                    const nextId = Math.max(0, ...prev.map((c: any) => c.id)) + 1;
+                                                    return [...prev, {
+                                                        id: nextId,
+                                                        name: stream.name,
+                                                        live: false,
+                                                        type: stream.protocol === 'USB' ? 'Camera' : 'NDI',
+                                                        networkStreamId: stream.id,
+                                                    }];
+                                                });
+                                            }}
+                                        >
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                            SAVE AS INPUT
+                                        </button>
                                     </div>
-                                    <span className="text-[10px] mt-1 text-[#bbcabf] font-mono">vMix - Output {num}</span>
+                                    <span className="text-[10px] mt-1 text-[#bbcabf] font-mono truncate w-full text-center">{stream.name}</span>
                                 </div>
                             ))}
-                        </div>
-                    </div>
-
-                    {/* Channel Group */}
-                    <div className="relative mb-2 mt-4">
-                        <div className="absolute -top-1 left-2 text-[9px] text-[#bbcabf] bg-[#131316] px-1 z-10 uppercase">LUMI-12345000</div>
-                        <div className="border-t border-[#3c4a42] mt-0.5 pt-3 grid grid-cols-4 gap-3 px-1">
-                            <div className="flex flex-col items-center">
-                                <div className="w-full aspect-video bg-[#0d0d0f] relative border border-[#3c4a42] shadow-sm flex items-center justify-center overflow-hidden hover:border-[#4edea3] transition-colors cursor-pointer">
-                                    {/* Dark scene placeholder */}
-                                    <div className="absolute inset-0 bg-gradient-to-b from-[#1a1a1f] to-[#0a0a0c]"></div>
-                                    <div className="absolute bottom-1/4 w-1/4 h-1/4 bg-[#2a2a2f] rounded"></div>
-                                    <div className="absolute bottom-0 left-0 bg-[#1f1f22] text-[#4edea3] text-[9px] font-bold px-1.5 py-0.5 z-10 border-t border-r border-[#3c4a42]">NDI</div>
-                                </div>
-                                <span className="text-[10px] mt-1 text-[#bbcabf] font-mono">Channel 1</span>
-                            </div>
                         </div>
                     </div>
                 </div>
